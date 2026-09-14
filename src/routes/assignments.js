@@ -37,6 +37,72 @@ router.post('/', (req, res) => {
   res.status(201).json(assignment);
 });
 
+// 複数パーツをまとめて1台のサーバーへ割り当てる
+router.post('/bulk', (req, res) => {
+  const db = readDB();
+  const { part_ids, server_id, installed_at, notes } = req.body || {};
+  if (!Array.isArray(part_ids) || !part_ids.length) {
+    return res.status(400).json({ error: '対象パーツがありません' });
+  }
+  const server = db.servers.find((s) => s.id === Number(server_id));
+  if (!server) return res.status(400).json({ error: 'サーバーが見つかりません' });
+
+  const now = new Date().toISOString();
+  const created = [];
+  const errors = [];
+  part_ids.forEach((rawId) => {
+    const id = Number(rawId);
+    const part = db.parts.find((p) => p.id === id);
+    if (!part) { errors.push({ part_id: id, error: 'パーツが見つかりません' }); return; }
+    if (part.status !== 'normal') {
+      errors.push({ part_id: id, error: `ステータスが「${part.status}」のため割り当てできません` });
+      return;
+    }
+    if (findActiveAssignment(db, id)) {
+      errors.push({ part_id: id, error: '既に割り当て済みです' });
+      return;
+    }
+    const assignment = {
+      id: nextId(db, 'assignments'),
+      part_id: id,
+      server_id: server.id,
+      part_name_snapshot: part.name,
+      part_category_snapshot: part.category,
+      server_name_snapshot: server.name,
+      installed_at: installed_at || now,
+      removed_at: null,
+      notes: notes ? String(notes).trim() : '',
+    };
+    db.assignments.push(assignment);
+    created.push(assignment);
+  });
+
+  if (created.length) writeDB(db);
+  res.json({ created, errors });
+});
+
+// 複数の割り当てをまとめて取り外す
+router.post('/bulk-remove', (req, res) => {
+  const db = readDB();
+  const { assignment_ids, removed_at } = req.body || {};
+  if (!Array.isArray(assignment_ids) || !assignment_ids.length) {
+    return res.status(400).json({ error: '対象がありません' });
+  }
+  const now = removed_at || new Date().toISOString();
+  const removed = [];
+  const errors = [];
+  assignment_ids.forEach((rawId) => {
+    const id = Number(rawId);
+    const a = db.assignments.find((x) => x.id === id);
+    if (!a) { errors.push({ id, error: '見つかりません' }); return; }
+    if (a.removed_at !== null) { errors.push({ id, error: '既に取り外し済みです' }); return; }
+    a.removed_at = now;
+    removed.push(id);
+  });
+  if (removed.length) writeDB(db);
+  res.json({ removed, errors });
+});
+
 // 取り外す（使用中 -> 在庫）
 router.post('/:id/remove', (req, res) => {
   const db = readDB();

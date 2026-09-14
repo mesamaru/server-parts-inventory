@@ -133,6 +133,59 @@ router.post('/bulk', (req, res) => {
   });
 });
 
+// 複数パーツのカテゴリ／ステータスをまとめて変更する（空欄の項目は変更しない）
+router.post('/bulk-edit', (req, res) => {
+  const db = readDB();
+  const { ids, category, status } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: '対象パーツがありません' });
+  }
+  let resolvedStatus;
+  if (status !== undefined && status !== '') {
+    resolvedStatus = resolveStatus(status);
+    if (!resolvedStatus) return res.status(400).json({ error: '不正なステータスです' });
+  }
+  const trimmedCategory = category && String(category).trim();
+  const now = new Date().toISOString();
+  const updated = [];
+  const errors = [];
+  ids.forEach((rawId) => {
+    const id = Number(rawId);
+    const part = db.parts.find((p) => p.id === id);
+    if (!part) { errors.push({ id, error: 'パーツが見つかりません' }); return; }
+    if (trimmedCategory) part.category = trimmedCategory;
+    if (resolvedStatus) part.status = resolvedStatus;
+    part.updated_at = now;
+    updated.push(id);
+  });
+  if (updated.length) writeDB(db);
+  res.json({ updated: updated.map((id) => decorate(db, db.parts.find((p) => p.id === id))), errors });
+});
+
+// 複数パーツをまとめて削除する（割り当て中のものは失敗として報告する）
+router.post('/bulk-delete', (req, res) => {
+  const db = readDB();
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: '対象パーツがありません' });
+  }
+  const deleted = [];
+  const errors = [];
+  ids.forEach((rawId) => {
+    const id = Number(rawId);
+    const idx = db.parts.findIndex((p) => p.id === id);
+    if (idx === -1) { errors.push({ id, error: 'パーツが見つかりません' }); return; }
+    if (findActiveAssignment(db, id)) {
+      errors.push({ id, error: '割り当て中のため削除できません' });
+      return;
+    }
+    db.parts.splice(idx, 1);
+    deleted.push(id);
+  });
+  if (deleted.length) writeDB(db);
+  res.json({ deleted, errors });
+});
+
 router.put('/:id', (req, res) => {
   const db = readDB();
   const part = db.parts.find((p) => p.id === Number(req.params.id));

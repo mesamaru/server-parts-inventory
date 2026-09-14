@@ -4,6 +4,7 @@ const STATE_LABEL = { in_stock: '在庫', assigned: '使用中' };
 
 let partsCache = [];
 let serversCache = [];
+let selectedPartIds = new Set();
 
 /* ---------- api helper ---------- */
 async function api(path, options = {}) {
@@ -57,6 +58,8 @@ async function loadParts() {
   if (state) params.set('assignment_state', state);
   if (status) params.set('status', status);
   partsCache = await api(`/api/parts?${params.toString()}`);
+  const validIds = new Set(partsCache.map((p) => p.id));
+  [...selectedPartIds].forEach((id) => { if (!validIds.has(id)) selectedPartIds.delete(id); });
   renderCategoryFilterOptions();
   renderPartsTable();
 }
@@ -82,6 +85,7 @@ function renderPartsTable() {
   if (!partsCache.length) {
     tbody.innerHTML = '';
     empty.hidden = false;
+    updateBulkBar();
     return;
   }
   empty.hidden = true;
@@ -104,6 +108,7 @@ function renderPartsTable() {
     actions.push(`<button class="link" data-edit-part="${p.id}">編集</button>`);
     actions.push(`<button class="link" data-delete-part="${p.id}">削除</button>`);
     return `<tr>
+      <td data-label=""><input type="checkbox" class="row-check" data-row-check="${p.id}" ${selectedPartIds.has(p.id) ? 'checked' : ''} /></td>
       <td data-label="カテゴリ">${escapeHtml(p.category)}</td>
       <td data-label="名称">${escapeHtml(p.name)}</td>
       <td data-label="スペック">${escapeHtml(p.spec) || '-'}</td>
@@ -111,10 +116,47 @@ function renderPartsTable() {
       <td data-label="ステータス"><span class="badge status-${p.status}">${STATUS_LABEL[p.status]}</span></td>
       <td data-label="状態">${stateBadge}</td>
       <td data-label="割当先">${serverCell}</td>
+      <td data-label="登録日">${fmtDate(p.created_at)}</td>
       <td data-label="操作"><div class="row-actions">${actions.join('')}</div></td>
     </tr>`;
   }).join('');
+  updateBulkBar();
 }
+
+function syncRowCheckboxes() {
+  document.querySelectorAll('#parts-tbody .row-check').forEach((cb) => {
+    cb.checked = selectedPartIds.has(Number(cb.dataset.rowCheck));
+  });
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('parts-bulk-bar');
+  const count = selectedPartIds.size;
+  document.getElementById('parts-bulk-count').textContent = count;
+  bar.hidden = count === 0;
+
+  const selectAll = document.getElementById('parts-select-all');
+  const visibleIds = partsCache.map((p) => p.id);
+  const selectedVisible = visibleIds.filter((id) => selectedPartIds.has(id));
+  selectAll.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
+  selectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
+}
+
+document.getElementById('parts-select-all').addEventListener('change', (e) => {
+  if (e.target.checked) {
+    partsCache.forEach((p) => selectedPartIds.add(p.id));
+  } else {
+    partsCache.forEach((p) => selectedPartIds.delete(p.id));
+  }
+  syncRowCheckboxes();
+  updateBulkBar();
+});
+
+document.getElementById('btn-bulk-clear').addEventListener('click', () => {
+  selectedPartIds.clear();
+  syncRowCheckboxes();
+  updateBulkBar();
+});
 
 document.getElementById('parts-search').addEventListener('input', debounce(loadParts, 250));
 document.getElementById('parts-filter-category').addEventListener('change', loadParts);
@@ -128,6 +170,12 @@ function debounce(fn, ms) {
 
 document.getElementById('parts-tbody').addEventListener('click', async (e) => {
   const t = e.target;
+  if (t.dataset.rowCheck) {
+    const id = Number(t.dataset.rowCheck);
+    if (t.checked) selectedPartIds.add(id); else selectedPartIds.delete(id);
+    updateBulkBar();
+    return;
+  }
   if (t.dataset.openServer) return openServerDetail(Number(t.dataset.openServer));
   if (t.dataset.assignPart) return openAssignDialog({ partId: Number(t.dataset.assignPart) });
   if (t.dataset.removeAssignment) return removeAssignment(Number(t.dataset.removeAssignment));
@@ -156,6 +204,134 @@ async function deletePart(id) {
     alert(err.message);
   }
 }
+
+/* ---- 一括操作 ---- */
+
+document.getElementById('btn-bulk-delete-open').addEventListener('click', async () => {
+  const ids = [...selectedPartIds];
+  if (!ids.length) return;
+  if (!confirm(`${ids.length}件のパーツを削除します。よろしいですか？`)) return;
+  try {
+    const res = await api('/api/parts/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
+    if (res.errors.length) {
+      alert(`${res.deleted.length}件削除しました。\n${res.errors.length}件は削除できませんでした:\n` +
+        res.errors.map((e) => `#${e.id}: ${e.error}`).join('\n'));
+    }
+    selectedPartIds.clear();
+    await loadParts();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.getElementById('btn-bulk-remove-open').addEventListener('click', async () => {
+  const ids = new Set(selectedPartIds);
+  const targets = partsCache.filter((p) => ids.has(p.id) && p.assignment_state === 'assigned');
+  if (!targets.length) {
+    alert('選択中に「使用中」のパーツがありません');
+    return;
+  }
+  if (!confirm(`${targets.length}件のパーツを取り外して在庫に戻しますか？`)) return;
+  try {
+    const res = await api('/api/assignments/bulk-remove', {
+      method: 'POST',
+      body: JSON.stringify({ assignment_ids: targets.map((p) => p.current_assignment_id) }),
+    });
+    if (res.errors.length) {
+      alert(`${res.removed.length}件取り外しました。\n${res.errors.length}件失敗:\n` +
+        res.errors.map((e) => `#${e.id}: ${e.error}`).join('\n'));
+    }
+    await loadParts();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+const dlgBulkAssign = document.getElementById('dlg-bulk-assign');
+let bulkAssignEligibleIds = [];
+document.getElementById('btn-bulk-assign-open').addEventListener('click', async () => {
+  const ids = new Set(selectedPartIds);
+  const eligible = partsCache.filter((p) => ids.has(p.id) && p.status === 'normal' && p.assignment_state === 'in_stock');
+  if (!eligible.length) {
+    alert('選択中に割り当て可能な在庫パーツがありません（在庫かつ正常のもののみ対象です）');
+    return;
+  }
+  bulkAssignEligibleIds = eligible.map((p) => p.id);
+  document.getElementById('bulk-assign-count').textContent = bulkAssignEligibleIds.length;
+  document.getElementById('bulk-assign-date').value = todayInputValue();
+  document.getElementById('bulk-assign-notes').value = '';
+  document.getElementById('bulk-assign-err').hidden = true;
+  if (!serversCache.length) await loadServers();
+  document.getElementById('bulk-assign-server-select').innerHTML =
+    serversCache.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+  dlgBulkAssign.showModal();
+});
+document.getElementById('btn-bulk-assign-cancel').addEventListener('click', () => dlgBulkAssign.close());
+document.getElementById('form-bulk-assign').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const server_id = document.getElementById('bulk-assign-server-select').value;
+  const dateVal = document.getElementById('bulk-assign-date').value;
+  const payload = {
+    part_ids: bulkAssignEligibleIds,
+    server_id: Number(server_id),
+    installed_at: dateVal ? new Date(dateVal).toISOString() : undefined,
+    notes: document.getElementById('bulk-assign-notes').value.trim(),
+  };
+  try {
+    const res = await api('/api/assignments/bulk', { method: 'POST', body: JSON.stringify(payload) });
+    dlgBulkAssign.close();
+    if (res.errors.length) {
+      alert(`${res.created.length}件割り当てました。\n${res.errors.length}件失敗:\n` +
+        res.errors.map((e) => `#${e.part_id}: ${e.error}`).join('\n'));
+    }
+    selectedPartIds.clear();
+    await loadParts();
+  } catch (err) {
+    const el = document.getElementById('bulk-assign-err');
+    el.textContent = err.message;
+    el.hidden = false;
+  }
+});
+
+const dlgBulkEdit = document.getElementById('dlg-bulk-edit');
+let bulkEditIds = [];
+document.getElementById('btn-bulk-edit-open').addEventListener('click', () => {
+  bulkEditIds = [...selectedPartIds];
+  if (!bulkEditIds.length) return;
+  document.getElementById('bulk-edit-count').textContent = bulkEditIds.length;
+  document.getElementById('bulk-edit-category').value = '';
+  document.getElementById('bulk-edit-status').value = '';
+  document.getElementById('bulk-edit-err').hidden = true;
+  dlgBulkEdit.showModal();
+});
+document.getElementById('btn-bulk-edit-cancel').addEventListener('click', () => dlgBulkEdit.close());
+document.getElementById('form-bulk-edit').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const category = document.getElementById('bulk-edit-category').value.trim();
+  const status = document.getElementById('bulk-edit-status').value;
+  if (!category && !status) {
+    const el = document.getElementById('bulk-edit-err');
+    el.textContent = 'カテゴリまたはステータスのどちらかを指定してください';
+    el.hidden = false;
+    return;
+  }
+  try {
+    const res = await api('/api/parts/bulk-edit', {
+      method: 'POST',
+      body: JSON.stringify({ ids: bulkEditIds, category: category || undefined, status: status || undefined }),
+    });
+    dlgBulkEdit.close();
+    if (res.errors.length) {
+      alert(`${res.updated.length}件更新しました。\n${res.errors.length}件失敗:\n` +
+        res.errors.map((e) => `#${e.id}: ${e.error}`).join('\n'));
+    }
+    await loadParts();
+  } catch (err) {
+    const el = document.getElementById('bulk-edit-err');
+    el.textContent = err.message;
+    el.hidden = false;
+  }
+});
 
 /* ---- パーツ登録/編集ダイアログ ---- */
 const dlgPart = document.getElementById('dlg-part');

@@ -35,11 +35,20 @@
       <button id="btn-bulk-import" class="secondary">CSVから一括登録</button>
       <button id="btn-new-part" class="primary">＋ 新規パーツ登録</button>
     </div>
+    <div class="bulk-bar" id="parts-bulk-bar" hidden>
+      <span><span id="parts-bulk-count">0</span>件選択中</span>
+      <button type="button" class="secondary" id="btn-bulk-assign-open">一括割り当て</button>
+      <button type="button" class="secondary" id="btn-bulk-remove-open">一括取り外し</button>
+      <button type="button" class="secondary" id="btn-bulk-edit-open">一括編集</button>
+      <button type="button" class="danger" id="btn-bulk-delete-open">一括削除</button>
+      <button type="button" class="link" id="btn-bulk-clear">選択解除</button>
+    </div>
     <table class="data-table">
       <thead>
         <tr>
+          <th><input type="checkbox" id="parts-select-all" /></th>
           <th>カテゴリ</th><th>名称</th><th>スペック</th><th>シリアル番号</th>
-          <th>ステータス</th><th>状態</th><th>割当先サーバー</th><th>操作</th>
+          <th>ステータス</th><th>状態</th><th>割当先サーバー</th><th>登録日</th><th>操作</th>
         </tr>
       </thead>
       <tbody id="parts-tbody"></tbody>
@@ -167,6 +176,52 @@
     <div class="dlg-actions">
       <button type="button" class="secondary" id="btn-assign-cancel">キャンセル</button>
       <button type="submit" class="primary">割り当てる</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 一括割り当てモーダル -->
+<dialog id="dlg-bulk-assign">
+  <form id="form-bulk-assign" method="dialog">
+    <h2>一括割り当て</h2>
+    <p class="info-line"><span id="bulk-assign-count">0</span>件のパーツをまとめて割り当てます（在庫かつ正常のものだけが対象です）。</p>
+    <label>割り当て先サーバー<span class="req">*</span>
+      <select id="bulk-assign-server-select"></select>
+    </label>
+    <label>取付日
+      <input id="bulk-assign-date" type="date" />
+    </label>
+    <label>備考
+      <textarea id="bulk-assign-notes" rows="2"></textarea>
+    </label>
+    <p class="err-msg" id="bulk-assign-err" hidden></p>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-bulk-assign-cancel">キャンセル</button>
+      <button type="submit" class="primary">割り当てる</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 一括編集モーダル -->
+<dialog id="dlg-bulk-edit">
+  <form id="form-bulk-edit" method="dialog">
+    <h2>一括編集</h2>
+    <p class="info-line"><span id="bulk-edit-count">0</span>件のパーツを編集します。空欄の項目は変更されません。</p>
+    <label>カテゴリを変更
+      <input id="bulk-edit-category" list="category-options" placeholder="変更しない場合は空欄のまま" />
+    </label>
+    <label>ステータスを変更
+      <select id="bulk-edit-status">
+        <option value="">変更しない</option>
+        <option value="normal">正常</option>
+        <option value="broken">故障</option>
+        <option value="retired">廃棄</option>
+      </select>
+    </label>
+    <p class="err-msg" id="bulk-edit-err" hidden></p>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-bulk-edit-cancel">キャンセル</button>
+      <button type="submit" class="primary">まとめて変更</button>
     </div>
   </form>
 </dialog>
