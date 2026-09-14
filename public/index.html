@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>サーバーパーツ在庫管理</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>サーバーパーツ在庫管理</h1>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="parts">パーツ一覧</button>
+    <button class="tab-btn" data-tab="servers">サーバー一覧</button>
+  </nav>
+</header>
+
+<main>
+  <!-- パーツ一覧 -->
+  <section id="tab-parts" class="tab-panel active">
+    <div class="toolbar">
+      <input id="parts-search" type="search" placeholder="検索（名称・スペック・シリアル番号など）" />
+      <select id="parts-filter-category"><option value="">すべてのカテゴリ</option></select>
+      <select id="parts-filter-state">
+        <option value="">すべての状態</option>
+        <option value="in_stock">在庫</option>
+        <option value="assigned">使用中</option>
+      </select>
+      <select id="parts-filter-status">
+        <option value="">すべてのステータス</option>
+        <option value="normal">正常</option>
+        <option value="broken">故障</option>
+        <option value="retired">廃棄</option>
+      </select>
+      <button id="btn-new-part" class="primary">＋ 新規パーツ登録</button>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>カテゴリ</th><th>名称</th><th>スペック</th><th>シリアル番号</th>
+          <th>ステータス</th><th>状態</th><th>割当先サーバー</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="parts-tbody"></tbody>
+    </table>
+    <p id="parts-empty" class="empty-msg" hidden>パーツが登録されていません。</p>
+  </section>
+
+  <!-- サーバー一覧 -->
+  <section id="tab-servers" class="tab-panel">
+    <div class="toolbar">
+      <input id="servers-search" type="search" placeholder="検索（サーバー名・設置場所）" />
+      <button id="btn-new-server" class="primary">＋ 新規サーバー登録</button>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr><th>サーバー名</th><th>設置場所</th><th>ステータス</th><th>搭載パーツ数</th><th>操作</th></tr>
+      </thead>
+      <tbody id="servers-tbody"></tbody>
+    </table>
+    <p id="servers-empty" class="empty-msg" hidden>サーバーが登録されていません。</p>
+  </section>
+</main>
+
+<!-- パーツ登録/編集モーダル -->
+<dialog id="dlg-part">
+  <form id="form-part" method="dialog">
+    <h2 id="part-dlg-title">新規パーツ登録</h2>
+    <input type="hidden" id="part-id" />
+    <label>カテゴリ<span class="req">*</span>
+      <input id="part-category" list="category-options" required placeholder="例: CPU, メモリ, ストレージ" />
+      <datalist id="category-options">
+        <option value="CPU"></option>
+        <option value="メモリ"></option>
+        <option value="ストレージ"></option>
+        <option value="マザーボード"></option>
+        <option value="電源(PSU)"></option>
+        <option value="GPU"></option>
+        <option value="NIC"></option>
+        <option value="RAIDカード"></option>
+        <option value="冷却ファン"></option>
+        <option value="ケース"></option>
+        <option value="その他"></option>
+      </datalist>
+    </label>
+    <label>名称／型番<span class="req">*</span>
+      <input id="part-name" required placeholder="例: Intel Xeon E5-2680 v4" />
+    </label>
+    <label>スペック詳細
+      <input id="part-spec" placeholder="例: 32GB DDR4 3200MHz" />
+    </label>
+    <label>シリアル番号
+      <input id="part-serial" />
+    </label>
+    <label>ステータス
+      <select id="part-status">
+        <option value="normal">正常</option>
+        <option value="broken">故障</option>
+        <option value="retired">廃棄</option>
+      </select>
+    </label>
+    <label>購入日
+      <input id="part-purchase-date" type="date" />
+    </label>
+    <label>備考
+      <textarea id="part-notes" rows="2"></textarea>
+    </label>
+    <p class="err-msg" id="part-err" hidden></p>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-part-cancel">キャンセル</button>
+      <button type="submit" class="primary" id="btn-part-save">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- サーバー登録/編集モーダル -->
+<dialog id="dlg-server">
+  <form id="form-server" method="dialog">
+    <h2 id="server-dlg-title">新規サーバー登録</h2>
+    <input type="hidden" id="server-id" />
+    <label>サーバー名<span class="req">*</span>
+      <input id="server-name" required placeholder="例: srv-web01" />
+    </label>
+    <label>設置場所
+      <input id="server-location" placeholder="例: ラックA-3" />
+    </label>
+    <label>ステータス
+      <input id="server-status" list="server-status-options" placeholder="例: 稼働中" />
+      <datalist id="server-status-options">
+        <option value="稼働中"></option>
+        <option value="停止中"></option>
+        <option value="メンテナンス中"></option>
+        <option value="廃止"></option>
+      </datalist>
+    </label>
+    <label>備考
+      <textarea id="server-notes" rows="2"></textarea>
+    </label>
+    <p class="err-msg" id="server-err" hidden></p>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-server-cancel">キャンセル</button>
+      <button type="submit" class="primary" id="btn-server-save">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- パーツ割り当てモーダル -->
+<dialog id="dlg-assign">
+  <form id="form-assign" method="dialog">
+    <h2 id="assign-dlg-title">パーツを割り当てる</h2>
+    <input type="hidden" id="assign-part-id" />
+    <input type="hidden" id="assign-server-id" />
+    <label id="assign-part-picker-label">パーツ<span class="req">*</span>
+      <select id="assign-part-select"></select>
+    </label>
+    <label id="assign-server-picker-label">割り当て先サーバー<span class="req">*</span>
+      <select id="assign-server-select"></select>
+    </label>
+    <label>取付日
+      <input id="assign-date" type="date" />
+    </label>
+    <label>備考
+      <textarea id="assign-notes" rows="2"></textarea>
+    </label>
+    <p class="err-msg" id="assign-err" hidden></p>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-assign-cancel">キャンセル</button>
+      <button type="submit" class="primary">割り当てる</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 移動モーダル -->
+<dialog id="dlg-move">
+  <form id="form-move" method="dialog">
+    <h2>別サーバーへ移動</h2>
+    <input type="hidden" id="move-assignment-id" />
+    <p id="move-current-info" class="info-line"></p>
+    <label>移動先サーバー<span class="req">*</span>
+      <select id="move-server-select"></select>
+    </label>
+    <label>備考
+      <textarea id="move-notes" rows="2"></textarea>
+    </label>
+    <p class="err-msg" id="move-err" hidden></p>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-move-cancel">キャンセル</button>
+      <button type="submit" class="primary">移動する</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- パーツ履歴モーダル -->
+<dialog id="dlg-part-history">
+  <div class="history-box">
+    <h2 id="part-history-title">パーツの割り当て履歴</h2>
+    <table class="data-table small">
+      <thead><tr><th>サーバー</th><th>取付日</th><th>取外日</th><th>備考</th></tr></thead>
+      <tbody id="part-history-tbody"></tbody>
+    </table>
+    <p id="part-history-empty" class="empty-msg" hidden>履歴がありません。</p>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-part-history-close">閉じる</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- サーバー詳細（構成）モーダル -->
+<dialog id="dlg-server-detail">
+  <div class="detail-box">
+    <div class="detail-header">
+      <h2 id="server-detail-title">サーバー構成</h2>
+      <button type="button" id="btn-server-detail-assign" class="primary">＋ パーツを割り当てる</button>
+    </div>
+    <p id="server-detail-meta" class="info-line"></p>
+
+    <h3>現在の構成</h3>
+    <table class="data-table small">
+      <thead><tr><th>カテゴリ</th><th>名称</th><th>スペック</th><th>シリアル番号</th><th>取付日</th><th>操作</th></tr></thead>
+      <tbody id="server-detail-config-tbody"></tbody>
+    </table>
+    <p id="server-detail-config-empty" class="empty-msg" hidden>現在割り当てられているパーツはありません。</p>
+
+    <h3>過去の構成履歴</h3>
+    <table class="data-table small">
+      <thead><tr><th>カテゴリ</th><th>名称</th><th>取付日</th><th>取外日</th></tr></thead>
+      <tbody id="server-detail-history-tbody"></tbody>
+    </table>
+    <p id="server-detail-history-empty" class="empty-msg" hidden>履歴がありません。</p>
+
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-server-detail-close">閉じる</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
