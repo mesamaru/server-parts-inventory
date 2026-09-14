@@ -30,7 +30,10 @@ def clean(value):
     if value is None:
         return ""
     v = value.strip()
-    if v in ("Not Specified", "Not Present", "None", "Unknown", "No Module Installed", ""):
+    if not v or v in ("Not Specified", "Not Present", "None", "No Module Installed"):
+        return ""
+    # dmidecodeは未設定のOEMコードを "Unknown" や "Unknown (0)" のように返すことがある
+    if v.lower().startswith("unknown"):
         return ""
     return v
 
