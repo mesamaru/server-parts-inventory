@@ -2,7 +2,18 @@ const express = require('express');
 const router = express.Router();
 const { readDB, writeDB, nextId } = require('../db');
 
-const STATUSES = ['normal', 'broken', 'retired'];
+const STATUS_ALIASES = {
+  '正常': 'normal', normal: 'normal',
+  '故障': 'broken', broken: 'broken',
+  '廃棄': 'retired', retired: 'retired',
+};
+
+function resolveStatus(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 'normal';
+  const key = String(raw).trim().toLowerCase();
+  const alias = STATUS_ALIASES[String(raw).trim()] || STATUS_ALIASES[key];
+  return alias || null;
+}
 
 function findActiveAssignment(db, partId) {
   return db.assignments.find((a) => a.part_id === partId && a.removed_at === null);
@@ -58,7 +69,8 @@ router.post('/', (req, res) => {
   const { category, name, spec, serial_number, status, purchase_date, notes } = req.body || {};
   if (!category || !String(category).trim()) return res.status(400).json({ error: 'カテゴリは必須です' });
   if (!name || !String(name).trim()) return res.status(400).json({ error: '名称は必須です' });
-  if (status && !STATUSES.includes(status)) return res.status(400).json({ error: '不正なステータスです' });
+  const resolvedStatus = resolveStatus(status);
+  if (!resolvedStatus) return res.status(400).json({ error: '不正なステータスです' });
   const now = new Date().toISOString();
   const part = {
     id: nextId(db, 'parts'),
@@ -66,7 +78,7 @@ router.post('/', (req, res) => {
     name: String(name).trim(),
     spec: spec ? String(spec).trim() : '',
     serial_number: serial_number ? String(serial_number).trim() : '',
-    status: status || 'normal',
+    status: resolvedStatus,
     purchase_date: purchase_date || null,
     notes: notes ? String(notes).trim() : '',
     created_at: now,
@@ -77,17 +89,65 @@ router.post('/', (req, res) => {
   res.status(201).json(decorate(db, part));
 });
 
+// CSV等からの一括登録用。1件ずつバリデーションし、有効な行だけまとめて登録する。
+router.post('/bulk', (req, res) => {
+  const db = readDB();
+  const { parts } = req.body || {};
+  if (!Array.isArray(parts) || !parts.length) {
+    return res.status(400).json({ error: '登録するパーツのデータがありません' });
+  }
+  const now = new Date().toISOString();
+  const toCreate = [];
+  const errors = [];
+
+  parts.forEach((raw, idx) => {
+    const rowNo = idx + 1;
+    const category = raw && raw.category ? String(raw.category).trim() : '';
+    const name = raw && raw.name ? String(raw.name).trim() : '';
+    if (!category) return errors.push({ row: rowNo, error: 'カテゴリが空です' });
+    if (!name) return errors.push({ row: rowNo, error: '名称が空です' });
+    const resolvedStatus = resolveStatus(raw.status);
+    if (!resolvedStatus) return errors.push({ row: rowNo, error: `不正なステータスです: ${raw.status}` });
+    toCreate.push({
+      id: nextId(db, 'parts'),
+      category,
+      name,
+      spec: raw.spec ? String(raw.spec).trim() : '',
+      serial_number: raw.serial_number ? String(raw.serial_number).trim() : '',
+      status: resolvedStatus,
+      purchase_date: raw.purchase_date ? String(raw.purchase_date).trim() : null,
+      notes: raw.notes ? String(raw.notes).trim() : '',
+      created_at: now,
+      updated_at: now,
+    });
+  });
+
+  if (toCreate.length) {
+    db.parts.push(...toCreate);
+    writeDB(db);
+  }
+
+  res.status(errors.length && !toCreate.length ? 400 : 201).json({
+    created: toCreate.map((p) => decorate(db, p)),
+    errors,
+  });
+});
+
 router.put('/:id', (req, res) => {
   const db = readDB();
   const part = db.parts.find((p) => p.id === Number(req.params.id));
   if (!part) return res.status(404).json({ error: 'パーツが見つかりません' });
   const { category, name, spec, serial_number, status, purchase_date, notes } = req.body || {};
-  if (status && !STATUSES.includes(status)) return res.status(400).json({ error: '不正なステータスです' });
+  let resolvedStatus;
+  if (status !== undefined) {
+    resolvedStatus = resolveStatus(status);
+    if (!resolvedStatus) return res.status(400).json({ error: '不正なステータスです' });
+  }
   if (category !== undefined) part.category = String(category).trim();
   if (name !== undefined) part.name = String(name).trim();
   if (spec !== undefined) part.spec = String(spec).trim();
   if (serial_number !== undefined) part.serial_number = String(serial_number).trim();
-  if (status !== undefined) part.status = status;
+  if (resolvedStatus !== undefined) part.status = resolvedStatus;
   if (purchase_date !== undefined) part.purchase_date = purchase_date || null;
   if (notes !== undefined) part.notes = String(notes).trim();
   part.updated_at = new Date().toISOString();

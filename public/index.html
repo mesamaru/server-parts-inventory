@@ -32,6 +32,7 @@
         <option value="broken">故障</option>
         <option value="retired">廃棄</option>
       </select>
+      <button id="btn-bulk-import" class="secondary">CSVから一括登録</button>
       <button id="btn-new-part" class="primary">＋ 新規パーツ登録</button>
     </div>
     <table class="data-table">
@@ -201,6 +202,43 @@
     <p id="part-history-empty" class="empty-msg" hidden>履歴がありません。</p>
     <div class="dlg-actions">
       <button type="button" class="secondary" id="btn-part-history-close">閉じる</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- CSV一括登録モーダル -->
+<dialog id="dlg-bulk-import">
+  <div class="detail-box">
+    <h2>CSVから一括登録</h2>
+    <p class="info-line">
+      1行目はヘッダー行にしてください。列: <code>category,name,spec,serial_number,status,purchase_date,notes</code>
+      （カテゴリ,名称,スペック,シリアル番号,ステータス,購入日,備考 でも可）。カテゴリ・名称は必須、他は空欄可。
+      ステータスは 正常/故障/廃棄（省略時は正常）。
+    </p>
+    <label>CSVファイルを選択
+      <input type="file" id="bulk-file-input" accept=".csv,text/csv" />
+    </label>
+    <label>またはCSVを直接貼り付け
+      <textarea id="bulk-csv-text" rows="8" placeholder="category,name,spec,serial_number,status,purchase_date,notes&#10;CPU,Intel Xeon E5-2680 v4,14core/28thread 2.4GHz,ABC123,正常,2024-05-01,"></textarea>
+    </label>
+    <div class="dlg-actions" style="justify-content:flex-start">
+      <button type="button" class="secondary" id="btn-bulk-preview">プレビュー</button>
+    </div>
+
+    <div id="bulk-preview-wrap" hidden>
+      <h3>プレビュー（<span id="bulk-preview-count"></span>）</h3>
+      <table class="data-table small">
+        <thead><tr><th>#</th><th>カテゴリ</th><th>名称</th><th>スペック</th><th>シリアル番号</th><th>ステータス</th><th>購入日</th><th>備考</th><th>判定</th></tr></thead>
+        <tbody id="bulk-preview-tbody"></tbody>
+      </table>
+    </div>
+
+    <p class="err-msg" id="bulk-err" hidden></p>
+    <p class="info-line" id="bulk-result" hidden></p>
+
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-bulk-cancel">閉じる</button>
+      <button type="button" class="primary" id="btn-bulk-submit" disabled>登録する</button>
     </div>
   </div>
 </dialog>

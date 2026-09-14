@@ -171,7 +171,11 @@ dialog input, dialog select, dialog textarea {
 .info-line { color: var(--text-muted); font-size: 13px; margin: 0 0 4px; }
 
 .detail-box { width: 100%; }
-#dlg-server-detail { width: min(820px, 94vw); }
+#dlg-server-detail, #dlg-bulk-import { width: min(820px, 94vw); }
+#dlg-bulk-import code { background: #f1f2f5; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+#dlg-bulk-import textarea { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.row-error { color: var(--danger); }
+.row-ok { color: var(--ok-text); }
 .detail-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .detail-header h2 { margin: 0; }
 

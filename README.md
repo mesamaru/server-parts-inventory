@@ -7,6 +7,7 @@
 ## 機能
 
 - パーツ一覧の登録・編集・削除（カテゴリ／型番／スペック／シリアル番号／購入日／ステータス）
+- CSVを貼り付け／アップロードしての一括登録（AI等でまとめたリストを一括で取り込み）
 - パーツのステータス管理（正常／故障／廃棄）
 - サーバー一覧の登録・編集・削除
 - パーツをサーバーへ割り当て・取り外し・別サーバーへの移動
@@ -46,12 +47,30 @@ npm start
 - **assignments（割り当て）**: パーツとサーバーの紐付け。`removed_at` が `null` なら
   現在使用中、値が入っていれば過去の割り当て（履歴）として保持されます。
 
+## CSV一括登録
+
+パーツ一覧画面の「CSVから一括登録」から、AIなどでまとめたパーツリストをそのまま取り込めます。
+1行目はヘッダー行にしてください。
+
+```csv
+category,name,spec,serial_number,status,purchase_date,notes
+CPU,Intel Xeon E5-2680 v4,14core/28thread 2.4GHz,ABC123,正常,2024-05-01,
+メモリ,32GB DDR4 ECC,32GB DDR4 3200MHz,,正常,,
+```
+
+- ヘッダーは英語（`category,name,spec,serial_number,status,purchase_date,notes`）でも
+  日本語（`カテゴリ,名称,スペック,シリアル番号,ステータス,購入日,備考`）でも認識されます。
+- 必須は `category`（カテゴリ）と `name`（名称）のみ。他は空欄可。
+- `status`（ステータス）は 正常/故障/廃棄（英語表記 normal/broken/retired も可）。空欄なら正常。
+- 行ごとにプレビューで検証され、エラーのある行だけ除外して残りを登録できます。
+
 ## API 概要
 
 | メソッド | パス | 内容 |
 | --- | --- | --- |
 | GET | /api/parts | パーツ一覧（検索・フィルタ可） |
 | POST | /api/parts | パーツ新規登録 |
+| POST | /api/parts/bulk | CSV等からの一括登録（`{ parts: [...] }`、行単位で成功/失敗を返す） |
 | GET | /api/parts/:id | パーツ詳細＋履歴 |
 | PUT | /api/parts/:id | パーツ更新 |
 | DELETE | /api/parts/:id | パーツ削除（割り当て中は不可） |

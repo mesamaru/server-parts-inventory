@@ -210,6 +210,155 @@ document.getElementById('form-part').addEventListener('submit', async (e) => {
   }
 });
 
+/* ---- CSV一括登録ダイアログ ---- */
+const dlgBulkImport = document.getElementById('dlg-bulk-import');
+const HEADER_ALIASES = {
+  category: ['category', 'カテゴリ'],
+  name: ['name', '名称', '型番', '品名'],
+  spec: ['spec', 'スペック', '仕様'],
+  serial_number: ['serial_number', 'serial', 'シリアル番号', 'シリアル'],
+  status: ['status', 'ステータス', '状態'],
+  purchase_date: ['purchase_date', '購入日'],
+  notes: ['notes', '備考', 'メモ'],
+};
+let bulkParsedRows = [];
+
+document.getElementById('btn-bulk-import').addEventListener('click', () => {
+  document.getElementById('bulk-csv-text').value = '';
+  document.getElementById('bulk-file-input').value = '';
+  document.getElementById('bulk-preview-wrap').hidden = true;
+  document.getElementById('bulk-err').hidden = true;
+  document.getElementById('bulk-result').hidden = true;
+  document.getElementById('btn-bulk-submit').disabled = true;
+  bulkParsedRows = [];
+  dlgBulkImport.showModal();
+});
+document.getElementById('btn-bulk-cancel').addEventListener('click', () => dlgBulkImport.close());
+
+document.getElementById('bulk-file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { document.getElementById('bulk-csv-text').value = String(reader.result); };
+  reader.readAsText(file, 'utf-8');
+});
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      row.push(field); field = '';
+    } else if (c === '\n') {
+      row.push(field); rows.push(row); row = []; field = '';
+    } else if (c === '\r') {
+      // skip, \r\n の \n 側で改行処理する
+    } else {
+      field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => !(r.length === 1 && r[0].trim() === ''));
+}
+
+function mapHeader(headerRow) {
+  const map = {};
+  headerRow.forEach((raw, i) => {
+    const h = raw.trim();
+    const hLower = h.toLowerCase();
+    const field = Object.keys(HEADER_ALIASES).find((key) =>
+      HEADER_ALIASES[key].some((alias) => alias.toLowerCase() === hLower || alias === h)
+    );
+    if (field) map[field] = i;
+  });
+  return map;
+}
+
+document.getElementById('btn-bulk-preview').addEventListener('click', () => {
+  const errEl = document.getElementById('bulk-err');
+  errEl.hidden = true;
+  document.getElementById('bulk-result').hidden = true;
+  const text = document.getElementById('bulk-csv-text').value;
+  const rows = parseCSV(text);
+  if (rows.length < 2) {
+    errEl.textContent = 'ヘッダー行とデータ行が必要です';
+    errEl.hidden = false;
+    return;
+  }
+  const headerMap = mapHeader(rows[0]);
+  if (headerMap.category === undefined || headerMap.name === undefined) {
+    errEl.textContent = 'ヘッダーに category(カテゴリ) と name(名称) の列が見つかりません';
+    errEl.hidden = false;
+    return;
+  }
+
+  bulkParsedRows = rows.slice(1).map((cols) => ({
+    category: (cols[headerMap.category] || '').trim(),
+    name: (cols[headerMap.name] || '').trim(),
+    spec: headerMap.spec !== undefined ? (cols[headerMap.spec] || '').trim() : '',
+    serial_number: headerMap.serial_number !== undefined ? (cols[headerMap.serial_number] || '').trim() : '',
+    status: headerMap.status !== undefined ? (cols[headerMap.status] || '').trim() : '',
+    purchase_date: headerMap.purchase_date !== undefined ? (cols[headerMap.purchase_date] || '').trim() : '',
+    notes: headerMap.notes !== undefined ? (cols[headerMap.notes] || '').trim() : '',
+  }));
+
+  const validStatuses = ['正常', '故障', '廃棄', 'normal', 'broken', 'retired', ''];
+  let validCount = 0;
+  const tbody = document.getElementById('bulk-preview-tbody');
+  tbody.innerHTML = bulkParsedRows.map((r, i) => {
+    let error = '';
+    if (!r.category) error = 'カテゴリが空です';
+    else if (!r.name) error = '名称が空です';
+    else if (!validStatuses.includes(r.status)) error = `不正なステータス: ${r.status}`;
+    if (!error) validCount++;
+    return `<tr>
+      <td>${i + 1}</td>
+      <td>${escapeHtml(r.category)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.spec)}</td>
+      <td>${escapeHtml(r.serial_number)}</td>
+      <td>${escapeHtml(r.status)}</td>
+      <td>${escapeHtml(r.purchase_date)}</td>
+      <td>${escapeHtml(r.notes)}</td>
+      <td>${error ? `<span class="row-error">${escapeHtml(error)}</span>` : '<span class="row-ok">OK</span>'}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('bulk-preview-count').textContent = `${bulkParsedRows.length}件中 ${validCount}件が登録可能`;
+  document.getElementById('bulk-preview-wrap').hidden = false;
+  document.getElementById('btn-bulk-submit').disabled = validCount === 0;
+});
+
+document.getElementById('btn-bulk-submit').addEventListener('click', async () => {
+  const errEl = document.getElementById('bulk-err');
+  errEl.hidden = true;
+  try {
+    const res = await api('/api/parts/bulk', { method: 'POST', body: JSON.stringify({ parts: bulkParsedRows }) });
+    const resultEl = document.getElementById('bulk-result');
+    let msg = `${res.created.length}件登録しました。`;
+    if (res.errors.length) {
+      msg += ` (${res.errors.length}件エラー: ${res.errors.map((e) => `${e.row}行目 - ${e.error}`).join(' / ')})`;
+    }
+    resultEl.textContent = msg;
+    resultEl.hidden = false;
+    document.getElementById('btn-bulk-submit').disabled = true;
+    await loadParts();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
 /* ---- パーツ履歴ダイアログ ---- */
 const dlgPartHistory = document.getElementById('dlg-part-history');
 document.getElementById('btn-part-history-close').addEventListener('click', () => dlgPartHistory.close());
