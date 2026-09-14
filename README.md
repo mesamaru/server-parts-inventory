@@ -47,6 +47,25 @@ npm start
 - **assignments（割り当て）**: パーツとサーバーの紐付け。`removed_at` が `null` なら
   現在使用中、値が入っていれば過去の割り当て（履歴）として保持されます。
 
+## Proxmox等の実機からパーツ情報を自動取得する
+
+[scripts/hw_to_csv.py](scripts/hw_to_csv.py) を対象サーバー（Proxmoxホスト等）で実行すると、
+`dmidecode` / `lsblk` / `lspci` から CPU・メモリ（DIMM単位）・ストレージ・マザーボード・
+GPU/NIC/RAIDカード・（対応機種のみ）電源を検出し、下記のCSV一括登録フォーマットで
+標準出力に書き出します。Python3 と dmidecode/lsblk/lspci はProxmox/Debianに標準で
+入っているため追加インストールは不要です。
+
+```bash
+scp scripts/hw_to_csv.py root@対象サーバー:/root/
+ssh root@対象サーバー
+sudo python3 hw_to_csv.py > parts.csv
+cat parts.csv   # 内容を確認してコピーし、CSVから一括登録に貼り付け
+```
+
+dmidecodeの読み取りにroot権限が必要なため `sudo`（または root ユーザー）で実行してください。
+CPU・メモリ・電源のシリアル番号がBIOS/ファームウェア側で設定されていない機体
+（家庭用PCの流用等）では、シリアル番号欄が空になることがあります。
+
 ## CSV一括登録
 
 パーツ一覧画面の「CSVから一括登録」から、AIなどでまとめたパーツリストをそのまま取り込めます。
