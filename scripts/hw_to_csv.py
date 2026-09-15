@@ -65,14 +65,71 @@ def dmidecode_records(dtype):
     return records
 
 
+# dmidecode/lspci が返すベンダー表記を、アプリのメーカートグルと揃った短い表記に寄せる
+MAKER_ALIASES = {
+    "genuineintel": "Intel",
+    "intel corporation": "Intel",
+    "intel": "Intel",
+    "authenticamd": "AMD",
+    "advanced micro devices, inc. [amd/ati]": "AMD",
+    "advanced micro devices, inc. [amd]": "AMD",
+    "amd": "AMD",
+    "nvidia corporation": "NVIDIA",
+    "realtek semiconductor co., ltd.": "Realtek",
+    "broadcom inc. and subsidiaries": "Broadcom",
+    "broadcom limited": "Broadcom",
+    "mellanox technologies": "Mellanox",
+    "samsung": "Samsung",
+    "samsung electronics co ltd": "Samsung",
+    "micron technology": "Micron / Crucial",
+    "micron": "Micron / Crucial",
+    "crucial": "Micron / Crucial",
+    "sk hynix": "SK hynix",
+    "skhynix": "SK hynix",
+    "hynix": "SK hynix",
+    "kingston": "Kingston",
+    "western digital": "Western Digital",
+    "wdc": "Western Digital",
+    "seagate": "Seagate",
+    "kioxia": "Kioxia",
+    "toshiba": "Kioxia",
+}
+
+# ストレージのモデル名は「メーカー名 + 型番」の形が多いので、先頭語で判定する
+STORAGE_MAKER_PREFIXES = [
+    "Samsung", "WDC", "WD", "Seagate", "Crucial", "Kioxia", "Toshiba",
+    "Intel", "Kingston", "SanDisk", "Hitachi", "HGST", "Dogfish",
+]
+
+
+def normalize_maker(raw):
+    value = clean(raw)
+    if not value:
+        return ""
+    return MAKER_ALIASES.get(value.lower(), value)
+
+
+def split_storage_maker(model):
+    """ストレージのモデル名を (メーカー, 残りの名称) に分解する。"""
+    model = clean(model)
+    if not model:
+        return "", ""
+    head = model.split()[0]
+    for prefix in STORAGE_MAKER_PREFIXES:
+        if head.lower() == prefix.lower():
+            rest = model[len(head):].strip()
+            return normalize_maker(prefix), (rest or model)
+    return "", model
+
+
 rows = []
 
 
-def add(category, name, spec, serial, notes=""):
+def add(category, name, maker, spec, serial, notes=""):
     name = clean(name)
     if not name:
         return
-    rows.append([category, name, clean(spec), clean(serial), "normal", "", notes])
+    rows.append([category, name, clean(maker), clean(spec), clean(serial), "normal", "", notes])
 
 
 # ---- CPU ----
@@ -93,7 +150,14 @@ for r in dmidecode_records("processor"):
         spec_bits.append(f"{threads}スレッド")
     if speed:
         spec_bits.append(speed)
-    add("CPU", version, " / ".join(spec_bits), r.get("Serial Number"), r.get("Socket Designation", ""))
+    add(
+        "CPU",
+        version,
+        normalize_maker(r.get("Manufacturer")),
+        " / ".join(spec_bits),
+        r.get("Serial Number"),
+        r.get("Socket Designation", ""),
+    )
 
 # ---- メモリ（DIMMスロット単位） ----
 for r in dmidecode_records("memory"):
@@ -102,26 +166,26 @@ for r in dmidecode_records("memory"):
         continue
     mtype = clean(r.get("Type"))
     speed = clean(r.get("Speed"))
-    manuf = clean(r.get("Manufacturer"))
+    form = clean(r.get("Form Factor"))
+    maker = normalize_maker(r.get("Manufacturer"))
     partnum = clean(r.get("Part Number"))
-    name = partnum or " ".join(filter(None, [manuf, mtype, size])) or f"{mtype} {size}".strip()
-    spec = " ".join(filter(None, [size, mtype, speed]))
-    add("メモリ", name, spec, r.get("Serial Number"), r.get("Locator", ""))
+    name = partnum or " ".join(filter(None, [mtype, size])) or size
+    spec = " ".join(filter(None, [size.replace(" ", ""), mtype, speed, form]))
+    add("メモリ", name, maker, spec, r.get("Serial Number"), r.get("Locator", ""))
 
 # ---- マザーボード ----
 for r in dmidecode_records("baseboard"):
     product = clean(r.get("Product Name"))
     if not product:
         continue
-    manuf = clean(r.get("Manufacturer"))
-    add("マザーボード", f"{manuf} {product}".strip(), r.get("Version"), r.get("Serial Number"))
+    add("マザーボード", product, normalize_maker(r.get("Manufacturer")), r.get("Version"), r.get("Serial Number"))
 
 # ---- 電源(PSU) : 対応している一部サーバー機種のみ検出される ----
 for r in dmidecode_records("39"):
     name = clean(r.get("Name")) or clean(r.get("Model Part Number"))
     if not name:
         continue
-    add("電源(PSU)", name, r.get("Max Power Capacity"), r.get("Serial Number"))
+    add("電源(PSU)", name, normalize_maker(r.get("Manufacturer")), r.get("Max Power Capacity"), r.get("Serial Number"))
 
 # ---- ストレージ ----
 lsblk_out = run(["lsblk", "-dn", "-P", "-o", "NAME,MODEL,SERIAL,SIZE,TYPE,ROTA"])
@@ -129,11 +193,13 @@ for line in lsblk_out.splitlines():
     fields = dict(re.findall(r'(\w+)="([^"]*)"', line))
     if fields.get("TYPE") != "disk":
         continue
-    kind = "HDD" if fields.get("ROTA") == "1" else "SSD/NVMe"
     dev = fields.get("NAME", "")
+    kind = "HDD" if fields.get("ROTA") == "1" else ("NVMe" if dev.startswith("nvme") else "SSD")
+    maker, model = split_storage_maker(fields.get("MODEL"))
     add(
         "ストレージ",
-        fields.get("MODEL") or dev,
+        model or dev,
+        maker,
         f"{fields.get('SIZE', '')} {kind}".strip(),
         fields.get("SERIAL"),
         f"/dev/{dev}",
@@ -156,11 +222,11 @@ for line in run(["lspci", "-mm"]).splitlines():
     category = PCI_CLASS_TO_CATEGORY.get(pci_class)
     if not category:
         continue
-    add(category, f"{vendor} {device}", pci_class, "", f"PCI {slot}")
+    add(category, device, normalize_maker(vendor), pci_class, "", f"PCI {slot}")
 
 # ---- 出力 ----
 writer = csv.writer(sys.stdout, lineterminator="\n")
-writer.writerow(["category", "name", "spec", "serial_number", "status", "purchase_date", "notes"])
+writer.writerow(["category", "name", "maker", "spec", "serial_number", "status", "purchase_date", "notes"])
 writer.writerows(rows)
 
 # ホスト自体の情報は参考としてstderrへ（サーバー登録名の参考用。CSVには含めない）

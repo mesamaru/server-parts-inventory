@@ -34,6 +34,30 @@ const STATE_ICON = {
   assigned: { icon: ICON.server, label: '使用中', cls: 'st-assigned' },
 };
 
+/* ---------- カテゴリ表記（通常 / 略記） ---------- */
+const CATEGORY_SHORT = {
+  CPU: 'CPU',
+  'メモリ': 'MEM',
+  'ストレージ': 'STG',
+  'マザーボード': 'MB',
+  '電源(PSU)': 'PSU',
+  GPU: 'GPU',
+  NIC: 'NIC',
+  'RAIDカード': 'RAID',
+  '冷却ファン': 'FAN',
+  'ケース': 'CASE',
+  'その他': 'ETC',
+};
+
+let categoryDisplay = 'full';
+try {
+  categoryDisplay = localStorage.getItem('categoryDisplay') || 'full';
+} catch { /* プライベートモード等でlocalStorageが使えない場合は既定値のまま */ }
+
+function categoryLabel(category) {
+  return categoryDisplay === 'short' ? (CATEGORY_SHORT[category] || category) : category;
+}
+
 function statusIcon(map, key) {
   const entry = map[key];
   if (!entry) return '-';
@@ -262,9 +286,9 @@ function renderPartsTable() {
   }
   empty.hidden = true;
   tbody.innerHTML = partsCache.map((p) => {
-    const serverCell = p.current_server_id
+    const location = p.current_server_id
       ? `<button class="server-link" data-open-server="${p.current_server_id}">${escapeHtml(p.current_server_name || '')}</button>`
-      : '-';
+      : '在庫';
     const isAssigned = !!p.current_assignment_id;
     const canAssign = p.status === 'normal' && !isAssigned;
     const actions = [];
@@ -277,13 +301,12 @@ function renderPartsTable() {
     actions.push(iconBtn(ICON.trash, '削除', `data-delete-part="${p.id}"`, true));
     return `<tr>
       <td data-label=""><input type="checkbox" class="row-check" data-row-check="${p.id}" ${selectedPartIds.has(p.id) ? 'checked' : ''} /></td>
-      <td data-label="カテゴリ" class="cell-category">${escapeHtml(p.category)}</td>
+      <td data-label="カテゴリ" class="cell-category">${escapeHtml(categoryLabel(p.category))}</td>
       <td data-label="名称">${p.maker ? `<span class="maker-tag">${escapeHtml(p.maker)}</span>` : ''}${escapeHtml(p.name)}</td>
       <td data-label="スペック">${escapeHtml(p.spec) || '-'}</td>
       <td data-label="シリアル番号">${escapeHtml(p.serial_number) || '-'}</td>
       <td data-label="ステータス">${statusIcon(STATUS_ICON, p.status)}</td>
-      <td data-label="状態">${statusIcon(STATE_ICON, p.assignment_state)}</td>
-      <td data-label="割当先">${serverCell}</td>
+      <td data-label="状態／割当先"><span class="state-cell">${statusIcon(STATE_ICON, p.assignment_state)}${location}</span></td>
       <td data-label="登録日">${fmtDate(p.created_at)}</td>
       <td data-label="操作"><div class="row-actions">${actions.join('')}</div></td>
     </tr>`;
@@ -324,6 +347,17 @@ document.getElementById('btn-bulk-clear').addEventListener('click', () => {
   selectedPartIds.clear();
   syncRowCheckboxes();
   updateBulkBar();
+});
+
+const categoryDisplaySelect = document.getElementById('category-display');
+categoryDisplaySelect.value = categoryDisplay;
+categoryDisplaySelect.addEventListener('change', async (e) => {
+  categoryDisplay = e.target.value;
+  try {
+    localStorage.setItem('categoryDisplay', categoryDisplay);
+  } catch { /* 保存できなくても表示自体は切り替える */ }
+  renderPartsTable();
+  if (dlgServerDetail.open && currentDetailServerId) await refreshServerDetail();
 });
 
 document.getElementById('parts-search').addEventListener('input', debounce(loadParts, 250));
@@ -423,37 +457,42 @@ async function openPartServerDialog(partId) {
   document.getElementById('part-server-current').textContent = isAssigned
     ? `現在: ${part.current_server_name} に割り当て中`
     : '現在: 在庫（どのサーバーにも割り当てられていません）';
-  document.getElementById('part-server-select-caption').textContent = isAssigned ? '移動先サーバー' : '割り当て先サーバー';
+  document.getElementById('part-server-select-caption').textContent = 'サーバー';
   document.getElementById('part-server-date').value = todayInputValue();
   document.getElementById('part-server-notes').value = '';
   document.getElementById('part-server-err').hidden = true;
   document.getElementById('btn-part-server-unassign').hidden = !isAssigned;
 
   if (!serversCache.length) await loadServers();
-  // 登録済みサーバーは常に一覧表示する。現在割り当て中のものは選べないようにするだけ。
+  // 割り当て済みなら現在のサーバーを選択状態で表示し、プルダウンで他サーバーへ変更できるようにする。
   const select = document.getElementById('part-server-select');
-  const submitBtn = document.getElementById('btn-part-server-submit');
   select.innerHTML = serversCache.map((s) => {
     const isCurrent = s.id === part.current_server_id;
-    return `<option value="${s.id}"${isCurrent ? ' disabled' : ''}>${escapeHtml(s.name)}${isCurrent ? '（現在割り当て中）' : ''}</option>`;
+    return `<option value="${s.id}">${escapeHtml(s.name)}${isCurrent ? '（現在）' : ''}</option>`;
   }).join('');
-  const selectable = serversCache.filter((s) => s.id !== part.current_server_id);
-  if (selectable.length) select.value = String(selectable[0].id);
+  if (isAssigned) select.value = String(part.current_server_id);
 
-  submitBtn.textContent = isAssigned ? '移動する' : '割り当てる';
-  submitBtn.disabled = !selectable.length;
-  const err = document.getElementById('part-server-err');
+  document.getElementById('btn-part-server-submit').textContent = isAssigned ? '移動する' : '割り当てる';
+  syncPartServerSubmit();
+
   if (!serversCache.length) {
+    const err = document.getElementById('part-server-err');
     err.textContent = 'サーバーが登録されていません。先にサーバー一覧から登録してください。';
-    err.hidden = false;
-  } else if (!selectable.length) {
-    err.textContent = '他に登録済みのサーバーがないため移動できません。';
     err.hidden = false;
   }
 
   dlgPartServer.showModal();
 }
 
+// 現在と同じサーバーが選ばれている間は「移動する」を押せないようにする
+function syncPartServerSubmit() {
+  const submitBtn = document.getElementById('btn-part-server-submit');
+  const selected = Number(document.getElementById('part-server-select').value);
+  const current = partServerTarget ? partServerTarget.current_server_id : null;
+  submitBtn.disabled = !serversCache.length || (current !== null && selected === current);
+}
+
+document.getElementById('part-server-select').addEventListener('change', syncPartServerSubmit);
 document.getElementById('btn-part-server-close').addEventListener('click', () => dlgPartServer.close());
 
 document.getElementById('form-part-server').addEventListener('submit', async (e) => {
@@ -796,6 +835,8 @@ const HEADER_ALIASES = {
   notes: ['notes', '備考', 'メモ'],
 };
 let bulkParsedRows = [];
+let bulkDupTargets = [];
+let bulkDupChoices = [];
 
 document.getElementById('btn-bulk-import').addEventListener('click', () => {
   document.getElementById('bulk-csv-text').value = '';
@@ -804,7 +845,11 @@ document.getElementById('btn-bulk-import').addEventListener('click', () => {
   document.getElementById('bulk-err').hidden = true;
   document.getElementById('bulk-result').hidden = true;
   document.getElementById('btn-bulk-submit').disabled = true;
+  document.getElementById('bulk-dup-bar').hidden = true;
+  document.getElementById('bulk-dup-all').value = '';
   bulkParsedRows = [];
+  bulkDupTargets = [];
+  bulkDupChoices = [];
   dlgBulkImport.showModal();
 });
 document.getElementById('btn-bulk-cancel').addEventListener('click', () => dlgBulkImport.close());
@@ -859,7 +904,80 @@ function mapHeader(headerRow) {
   return map;
 }
 
-document.getElementById('btn-bulk-preview').addEventListener('click', () => {
+// 既に登録済みのパーツと突き合わせる。シリアル番号があればそれを優先し、
+// 無ければカテゴリ・名称・スペックで判定する。同一内容が複数あっても
+// 1件ずつ消し込むので、同じメモリ2枚が1件に集約されることはない。
+function matchExistingParts(rows, existingParts) {
+  const pool = existingParts.map((part) => ({ part, used: false }));
+  return rows.map((r) => {
+    let hit = null;
+    if (r.serial_number) {
+      hit = pool.find((e) => !e.used && e.part.category === r.category && e.part.serial_number === r.serial_number);
+    }
+    if (!hit) {
+      hit = pool.find((e) => !e.used
+        && e.part.category === r.category
+        && e.part.name === r.name
+        && (e.part.spec || '') === (r.spec || ''));
+    }
+    if (!hit) return null;
+    hit.used = true;
+    return hit.part;
+  });
+}
+
+function rowError(r) {
+  const validStatuses = ['正常', '故障', '廃棄', 'normal', 'broken', 'retired', ''];
+  if (!r.category) return 'カテゴリが空です';
+  if (!r.name) return '名称が空です';
+  if (!validStatuses.includes(r.status)) return `不正なステータス: ${r.status}`;
+  return '';
+}
+
+function renderBulkPreview() {
+  const tbody = document.getElementById('bulk-preview-tbody');
+  let validCount = 0;
+  let dupCount = 0;
+
+  tbody.innerHTML = bulkParsedRows.map((r, i) => {
+    const error = rowError(r);
+    const dup = bulkDupTargets[i];
+    if (!error) validCount++;
+    if (dup) dupCount++;
+    const dupCell = dup
+      ? `<select class="dup-select" data-dup-row="${i}">
+           <option value="skip"${bulkDupChoices[i] === 'skip' ? ' selected' : ''}>登録済みを残す</option>
+           <option value="overwrite"${bulkDupChoices[i] === 'overwrite' ? ' selected' : ''}>CSVで上書き</option>
+           <option value="both"${bulkDupChoices[i] === 'both' ? ' selected' : ''}>両方登録</option>
+         </select>`
+      : '-';
+    const judge = error
+      ? `<span class="row-error">${escapeHtml(error)}</span>`
+      : (dup ? `<span class="row-dup">重複</span>` : '<span class="row-ok">新規</span>');
+    return `<tr>
+      <td>${i + 1}</td>
+      <td>${escapeHtml(r.category)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.maker)}</td>
+      <td>${escapeHtml(r.spec)}</td>
+      <td>${escapeHtml(r.serial_number)}</td>
+      <td>${escapeHtml(r.status)}</td>
+      <td>${judge}</td>
+      <td>${dupCell}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('bulk-preview-count').textContent =
+    `${bulkParsedRows.length}件中 ${validCount}件が登録可能` + (dupCount ? ` / うち${dupCount}件が登録済みと重複` : '');
+  const dupBar = document.getElementById('bulk-dup-bar');
+  dupBar.hidden = dupCount === 0;
+  document.getElementById('bulk-dup-summary').textContent =
+    `${dupCount}件が既に登録済みのパーツと一致しました。行ごとに扱いを選べます。`;
+  document.getElementById('bulk-preview-wrap').hidden = false;
+  document.getElementById('btn-bulk-submit').disabled = validCount === 0;
+}
+
+document.getElementById('btn-bulk-preview').addEventListener('click', async () => {
   const errEl = document.getElementById('bulk-err');
   errEl.hidden = true;
   document.getElementById('bulk-result').hidden = true;
@@ -888,39 +1006,59 @@ document.getElementById('btn-bulk-preview').addEventListener('click', () => {
     notes: headerMap.notes !== undefined ? (cols[headerMap.notes] || '').trim() : '',
   }));
 
-  const validStatuses = ['正常', '故障', '廃棄', 'normal', 'broken', 'retired', ''];
-  let validCount = 0;
-  const tbody = document.getElementById('bulk-preview-tbody');
-  tbody.innerHTML = bulkParsedRows.map((r, i) => {
-    let error = '';
-    if (!r.category) error = 'カテゴリが空です';
-    else if (!r.name) error = '名称が空です';
-    else if (!validStatuses.includes(r.status)) error = `不正なステータス: ${r.status}`;
-    if (!error) validCount++;
-    return `<tr>
-      <td>${i + 1}</td>
-      <td>${escapeHtml(r.category)}</td>
-      <td>${escapeHtml(r.name)}</td>
-      <td>${escapeHtml(r.spec)}</td>
-      <td>${escapeHtml(r.serial_number)}</td>
-      <td>${escapeHtml(r.status)}</td>
-      <td>${escapeHtml(r.purchase_date)}</td>
-      <td>${escapeHtml(r.notes)}</td>
-      <td>${error ? `<span class="row-error">${escapeHtml(error)}</span>` : '<span class="row-ok">OK</span>'}</td>
-    </tr>`;
-  }).join('');
-  document.getElementById('bulk-preview-count').textContent = `${bulkParsedRows.length}件中 ${validCount}件が登録可能`;
-  document.getElementById('bulk-preview-wrap').hidden = false;
-  document.getElementById('btn-bulk-submit').disabled = validCount === 0;
+  try {
+    const existingParts = await api('/api/parts');
+    bulkDupTargets = matchExistingParts(bulkParsedRows, existingParts);
+  } catch (err) {
+    errEl.textContent = `登録済みパーツの取得に失敗しました: ${err.message}`;
+    errEl.hidden = false;
+    return;
+  }
+  bulkDupChoices = bulkParsedRows.map(() => 'skip');
+  document.getElementById('bulk-dup-all').value = '';
+  renderBulkPreview();
+});
+
+document.getElementById('bulk-preview-tbody').addEventListener('change', (e) => {
+  const row = e.target.dataset.dupRow;
+  if (row === undefined) return;
+  bulkDupChoices[Number(row)] = e.target.value;
+});
+
+document.getElementById('bulk-dup-all').addEventListener('change', (e) => {
+  if (!e.target.value) return;
+  bulkDupChoices = bulkDupChoices.map((_, i) => (bulkDupTargets[i] ? e.target.value : 'skip'));
+  renderBulkPreview();
 });
 
 document.getElementById('btn-bulk-submit').addEventListener('click', async () => {
   const errEl = document.getElementById('bulk-err');
   errEl.hidden = true;
+
+  const payload = [];
+  let skipped = 0;
+  bulkParsedRows.forEach((r, i) => {
+    if (rowError(r)) { skipped++; return; }
+    const dup = bulkDupTargets[i];
+    if (!dup) { payload.push(r); return; }
+    const choice = bulkDupChoices[i];
+    if (choice === 'skip') { skipped++; return; }
+    payload.push(choice === 'overwrite' ? { ...r, update_id: dup.id } : r);
+  });
+
+  if (!payload.length) {
+    errEl.textContent = '反映する行がありません（すべてスキップまたはエラーです）';
+    errEl.hidden = false;
+    return;
+  }
+
   try {
-    const res = await api('/api/parts/bulk', { method: 'POST', body: JSON.stringify({ parts: bulkParsedRows }) });
+    const res = await api('/api/parts/bulk', { method: 'POST', body: JSON.stringify({ parts: payload }) });
     const resultEl = document.getElementById('bulk-result');
-    let msg = `${res.created.length}件登録しました。`;
+    const parts = [`${res.created.length}件を新規登録`];
+    if (res.updated.length) parts.push(`${res.updated.length}件を上書き`);
+    if (skipped) parts.push(`${skipped}件をスキップ`);
+    let msg = `${parts.join(' / ')}しました。`;
     if (res.errors.length) {
       msg += ` (${res.errors.length}件エラー: ${res.errors.map((e) => `${e.row}行目 - ${e.error}`).join(' / ')})`;
     }
@@ -1087,7 +1225,7 @@ function groupConfig(config) {
 function configRowHtml(c, groupId) {
   const isDetail = !!groupId;
   return `<tr class="${isDetail ? 'group-detail' : ''}"${isDetail ? ` data-group="${groupId}" hidden` : ''}>
-    <td>${isDetail ? '' : escapeHtml(c.category)}</td>
+    <td class="cell-category">${isDetail ? '' : escapeHtml(categoryLabel(c.category))}</td>
     <td>${escapeHtml(c.name)}</td>
     <td>${escapeHtml(c.spec) || '-'}</td>
     <td>${escapeHtml(c.serial_number) || '-'}</td>
@@ -1118,7 +1256,7 @@ async function openServerDetail(id) {
       const groupId = `g${gi}`;
       const head = g.items[0];
       const summary = `<tr class="group-row" data-group-toggle="${groupId}">
-        <td><span class="group-toggle-icon">▶</span> ${escapeHtml(head.category)}</td>
+        <td class="cell-category"><span class="group-toggle-icon">▶</span> ${escapeHtml(categoryLabel(head.category))}</td>
         <td>${escapeHtml(head.name)}<span class="group-count">×${g.items.length}</span></td>
         <td>${escapeHtml(head.spec) || '-'}</td>
         <td colspan="3">クリックで内訳を表示</td>

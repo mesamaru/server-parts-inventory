@@ -41,6 +41,24 @@ body {
 }
 .topbar h1 { margin: 0 0 12px; font-size: 20px; }
 
+.topbar-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.inline-setting {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding-bottom: 8px;
+}
+.inline-setting select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--text);
+}
+
 .tabs { display: flex; gap: 4px; }
 .tab-btn {
   border: none;
@@ -307,6 +325,25 @@ tr.group-detail { background: #fcfcfd; }
 .st-assigned { color: var(--ok-text); }
 
 .confirm-message { font-size: 14px; line-height: 1.6; margin: 0; white-space: pre-wrap; }
+
+.state-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+.dup-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.dup-bar .inline-setting { color: inherit; padding-bottom: 0; }
+.row-dup { color: var(--warn-text); font-weight: 600; }
+.dup-select { padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
 
 .badge {
   display: inline-block;

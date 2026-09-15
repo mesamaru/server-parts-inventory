@@ -9,10 +9,18 @@
 <body>
 <header class="topbar">
   <h1>サーバーパーツ在庫管理</h1>
-  <nav class="tabs">
-    <button class="tab-btn active" data-tab="parts">パーツ一覧</button>
-    <button class="tab-btn" data-tab="servers">サーバー一覧</button>
-  </nav>
+  <div class="topbar-row">
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="parts">パーツ一覧</button>
+      <button class="tab-btn" data-tab="servers">サーバー一覧</button>
+    </nav>
+    <label class="inline-setting">カテゴリ表記
+      <select id="category-display">
+        <option value="full">通常</option>
+        <option value="short">略記</option>
+      </select>
+    </label>
+  </div>
 </header>
 
 <main>
@@ -61,7 +69,7 @@
           <tr>
             <th><input type="checkbox" id="parts-select-all" /></th>
             <th>カテゴリ</th><th>名称</th><th>スペック</th><th>シリアル番号</th>
-            <th>ステータス</th><th>状態</th><th>割当先サーバー</th><th>登録日</th><th>操作</th>
+            <th>ステータス</th><th>状態／割当先</th><th>登録日</th><th>操作</th>
           </tr>
         </thead>
         <tbody id="parts-tbody"></tbody>
@@ -346,10 +354,23 @@
 
     <div id="bulk-preview-wrap" hidden>
       <h3>プレビュー（<span id="bulk-preview-count"></span>）</h3>
-      <table class="data-table small">
-        <thead><tr><th>#</th><th>カテゴリ</th><th>名称</th><th>スペック</th><th>シリアル番号</th><th>ステータス</th><th>購入日</th><th>備考</th><th>判定</th></tr></thead>
-        <tbody id="bulk-preview-tbody"></tbody>
-      </table>
+      <div class="dup-bar" id="bulk-dup-bar" hidden>
+        <span id="bulk-dup-summary"></span>
+        <label class="inline-setting">重複行をまとめて
+          <select id="bulk-dup-all">
+            <option value="">選択…</option>
+            <option value="skip">登録済みを残す（スキップ）</option>
+            <option value="overwrite">CSVの内容で上書き</option>
+            <option value="both">両方登録する</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table small">
+          <thead><tr><th>#</th><th>カテゴリ</th><th>名称</th><th>メーカー</th><th>スペック</th><th>シリアル番号</th><th>ステータス</th><th>判定</th><th>重複時の扱い</th></tr></thead>
+          <tbody id="bulk-preview-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
     <p class="err-msg" id="bulk-err" hidden></p>

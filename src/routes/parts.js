@@ -108,7 +108,8 @@ router.post('/', (req, res) => {
   res.status(201).json(decorate(db, part));
 });
 
-// CSV等からの一括登録用。1件ずつバリデーションし、有効な行だけまとめて登録する。
+// CSV等からの一括登録用。1件ずつバリデーションし、有効な行だけまとめて反映する。
+// update_id が指定された行は新規登録ではなく、その既存パーツの上書き更新になる。
 router.post('/bulk', (req, res) => {
   const db = readDB();
   const { parts } = req.body || {};
@@ -117,6 +118,7 @@ router.post('/bulk', (req, res) => {
   }
   const now = new Date().toISOString();
   const toCreate = [];
+  const updated = [];
   const errors = [];
 
   parts.forEach((raw, idx) => {
@@ -127,8 +129,8 @@ router.post('/bulk', (req, res) => {
     if (!name) return errors.push({ row: rowNo, error: '名称が空です' });
     const resolvedStatus = resolveStatus(raw.status);
     if (!resolvedStatus) return errors.push({ row: rowNo, error: `不正なステータスです: ${raw.status}` });
-    toCreate.push({
-      id: nextId(db, 'parts'),
+
+    const values = {
       category,
       name,
       maker: raw.maker ? String(raw.maker).trim() : '',
@@ -137,18 +139,27 @@ router.post('/bulk', (req, res) => {
       status: resolvedStatus,
       purchase_date: raw.purchase_date ? String(raw.purchase_date).trim() : null,
       notes: raw.notes ? String(raw.notes).trim() : '',
-      created_at: now,
-      updated_at: now,
-    });
+    };
+
+    if (raw.update_id) {
+      const target = db.parts.find((p) => p.id === Number(raw.update_id));
+      if (!target) return errors.push({ row: rowNo, error: '上書き対象のパーツが見つかりません' });
+      Object.assign(target, values, { updated_at: now });
+      updated.push(target);
+      return;
+    }
+
+    toCreate.push({ id: nextId(db, 'parts'), ...values, created_at: now, updated_at: now });
   });
 
-  if (toCreate.length) {
+  if (toCreate.length || updated.length) {
     db.parts.push(...toCreate);
     writeDB(db);
   }
 
-  res.status(errors.length && !toCreate.length ? 400 : 201).json({
+  res.status(errors.length && !toCreate.length && !updated.length ? 400 : 201).json({
     created: toCreate.map((p) => decorate(db, p)),
+    updated: updated.map((p) => decorate(db, p)),
     errors,
   });
 });
