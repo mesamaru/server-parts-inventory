@@ -1399,20 +1399,63 @@ async function loadServers() {
   renderServersTable();
 }
 
+/* ---- 簡易表示 / 詳細表示 ---- */
+let serversViewMode = 'simple';
+try {
+  serversViewMode = localStorage.getItem('serversViewMode') || 'simple';
+} catch { /* プライベートモード等でlocalStorageが使えない場合は既定値のまま */ }
+
+function applyServersViewMode() {
+  document.querySelectorAll('#servers-view-switch .view-switch-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === serversViewMode);
+  });
+  document.querySelectorAll('.detail-col').forEach((el) => { el.hidden = serversViewMode !== 'detail'; });
+}
+
+document.getElementById('servers-view-switch').addEventListener('click', (e) => {
+  const btn = e.target.closest('.view-switch-btn');
+  if (!btn) return;
+  serversViewMode = btn.dataset.view;
+  try {
+    localStorage.setItem('serversViewMode', serversViewMode);
+  } catch { /* 保存できなくても表示自体は切り替える */ }
+  applyServersViewMode();
+});
+
+// hardware.cpu / .storage のような「name + spec」配列を簡潔なHTMLにする
+function hwList(items) {
+  if (!items || !items.length) return '<span class="hw-empty">-</span>';
+  return items.map((it) => `<div><span class="hw-name">${escapeHtml(it.name)}</span>`
+    + (it.spec ? `<br /><span class="hw-spec">${escapeHtml(it.spec)}</span>` : '') + '</div>').join('');
+}
+
+function hwMemory(memory) {
+  if (!memory || !memory.count) return '<span class="hw-empty">-</span>';
+  const items = memory.items.map((v) => (v === null ? '?' : v));
+  const total = memory.total_gb ? `${memory.total_gb}GB` : '?GB';
+  return `<span class="hw-name">${total}</span><br /><span class="hw-spec">（内訳 ${items.join(', ')}）</span>`;
+}
+
 function renderServersTable() {
   const tbody = document.getElementById('servers-tbody');
   const empty = document.getElementById('servers-empty');
+  applyServersViewMode();
   if (!serversCache.length) {
     tbody.innerHTML = '';
     empty.hidden = false;
     return;
   }
   empty.hidden = true;
-  tbody.innerHTML = serversCache.map((s) => `<tr>
+  tbody.innerHTML = serversCache.map((s) => {
+    const hw = s.hardware || { cpu: [], memory: { count: 0 }, storage: [] };
+    return `<tr>
     <td data-label="サーバー名"><button class="server-link" data-open-server="${s.id}">${escapeHtml(s.name)}</button></td>
     <td data-label="設置場所">${escapeHtml(s.location) || '-'}</td>
     <td data-label="ステータス">${escapeHtml(s.status) || '-'}</td>
     <td data-label="搭載パーツ数">${s.current_parts_count}</td>
+    <td data-label="CPU" class="detail-col hw-summary" hidden>${hwList(hw.cpu)}</td>
+    <td data-label="メモリ" class="detail-col hw-summary" hidden>${hwMemory(hw.memory)}</td>
+    <td data-label="ストレージ" class="detail-col hw-summary" hidden>${hwList(hw.storage)}</td>
     <td data-label="操作"><div class="row-actions">
       ${iconBtn(ICON.view, '構成を見る', `data-open-server="${s.id}"`)}
       ${(currentUser && currentUser.role === 'admin' && s.ssh && s.ssh.configured)
@@ -1421,7 +1464,9 @@ function renderServersTable() {
       ${iconBtn(ICON.edit, '編集', `data-edit-server="${s.id}"`)}
       ${iconBtn(ICON.trash, '削除', `data-delete-server="${s.id}"`, true)}
     </div></td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
+  applyServersViewMode();
 }
 
 document.getElementById('servers-search').addEventListener('input', debounce(loadServers, 250));
@@ -1480,15 +1525,27 @@ function openServerDialog(id) {
   document.getElementById('server-err').hidden = true;
   document.getElementById('form-server').reset();
   document.getElementById('server-id').value = id || '';
+  // 前回の編集で残った「旧設定」用の一時選択肢を毎回取り除く
+  document.querySelectorAll('#server-status option[data-legacy]').forEach((o) => o.remove());
   if (id) {
     const s = serversCache.find((x) => x.id === id);
     document.getElementById('server-dlg-title').textContent = 'サーバーを編集';
     document.getElementById('server-name').value = s.name;
     document.getElementById('server-location').value = s.location;
-    document.getElementById('server-status').value = s.status;
     document.getElementById('server-notes').value = s.notes;
+    const statusSelect = document.getElementById('server-status');
+    // 以前は自由入力だったため、選択肢に無い値が残っている場合だけ一時的に足して保持する
+    if (s.status && ![...statusSelect.options].some((o) => o.value === s.status)) {
+      const opt = document.createElement('option');
+      opt.value = s.status;
+      opt.textContent = `${s.status}（旧設定）`;
+      opt.dataset.legacy = '1';
+      statusSelect.appendChild(opt);
+    }
+    statusSelect.value = s.status || '稼働中';
   } else {
     document.getElementById('server-dlg-title').textContent = '新規サーバー登録';
+    document.getElementById('server-status').value = '稼働中';
   }
   renderSshDetails(id ? serversCache.find((x) => x.id === id) : null);
   dlgServer.showModal();
@@ -1641,16 +1698,15 @@ document.getElementById('form-server').addEventListener('submit', async (e) => {
       created = await api('/api/servers', { method: 'POST', body: JSON.stringify(payload) });
     }
     // closeイベントで選択が巻き戻らないよう、閉じる前にフラグを降ろす
-    const fromSyncTab = syncAwaitingNewServer;
-    syncAwaitingNewServer = false;
+    const forUnassignedReportId = pendingServerReportId;
+    pendingServerReportId = null;
     dlgServer.close();
     await loadServers();
-    if (fromSyncTab && created) {
-      await loadCommandBuilder();
-      const select = document.getElementById('cmd-server');
-      select.value = created.name;
-      syncServerPrevValue = created.name;
-      renderCommand();
+    if (forUnassignedReportId && created) {
+      // 未割り当てレポートのプルダウンに、今作ったサーバーを選択済みで反映する
+      renderUnassignedReports();
+      const select = document.querySelector(`[data-unassigned-server-select="${forUnassignedReportId}"]`);
+      if (select) select.value = String(created.id);
     }
   } catch (err) {
     const el = document.getElementById('server-err');
@@ -2122,12 +2178,6 @@ const TOKEN_PLACEHOLDER = '<APIトークン>';
 const issuedTokens = new Map();
 
 async function loadCommandBuilder() {
-  const serverSelect = document.getElementById('cmd-server');
-  const keepServer = serverSelect.value;
-  serverSelect.innerHTML = serversCache.map((s) => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join('')
-    + '<option value="__new_server__">＋ 新しいサーバーを登録する</option>';
-  if (keepServer && keepServer !== '__new_server__') serverSelect.value = keepServer;
-
   const urlInput = document.getElementById('cmd-url');
   if (!urlInput.value) urlInput.value = location.origin;
 
@@ -2142,14 +2192,16 @@ async function reloadTokenOptions() {
   const errEl = document.getElementById('cmd-token-err');
   errEl.hidden = true;
 
-  // トークンの発行も一覧取得も管理者専用なので、一般ユーザーには選択肢を出さない
+  // 一般ユーザーも「実行時に入力する」は選べる（トークンの発行・一覧取得は管理者専用のため出さない）
   if (!currentUser || currentUser.role !== 'admin') {
-    tokenSelect.innerHTML = '<option value="">(管理者に発行してもらってください)</option>';
-    tokenSelect.disabled = true;
+    tokenSelect.innerHTML = '<option value="__prompt__">実行時に入力する（推奨）</option>';
+    tokenSelect.disabled = false;
+    tokenSelect.value = '__prompt__';
     return;
   }
   tokenSelect.disabled = false;
-  let options = '<option value="__new__">＋ 新しいトークンを発行する</option>';
+  let options = '<option value="__prompt__">実行時に入力する（推奨）</option>'
+    + '<option value="__new__">＋ 新しいトークンを発行してコマンドに埋め込む</option>';
   try {
     const tokens = await api('/api/auth/tokens');
     options += tokens.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
@@ -2160,39 +2212,42 @@ async function reloadTokenOptions() {
   tokenSelect.innerHTML = options;
   if (keepToken && [...tokenSelect.options].some((o) => o.value === keepToken)) {
     tokenSelect.value = keepToken;
+  } else {
+    tokenSelect.value = '__prompt__';
   }
 }
 
 function renderCommand() {
   const os = document.getElementById('cmd-os').value;
-  const serverValue = document.getElementById('cmd-server').value;
-  const server = (!serverValue || serverValue === '__new_server__') ? '<サーバー名>' : serverValue;
   const url = (document.getElementById('cmd-url').value || location.origin).replace(/\/+$/, '');
   const tokenId = document.getElementById('cmd-token').value;
-  const token = issuedTokens.get(tokenId) || TOKEN_PLACEHOLDER;
+  const token = issuedTokens.get(tokenId) || null;
   const useSudo = document.getElementById('cmd-sudo').checked;
 
   document.getElementById('cmd-sudo-field').hidden = os === 'windows';
 
   const note = document.getElementById('cmd-token-note');
-  if (tokenId === '__new__') {
+  if (tokenId === '__prompt__') {
+    note.textContent = '実行時にAPIトークンの入力を求められます（画面に表示されず、シェル履歴にも残りません）。';
+  } else if (tokenId === '__new__') {
     note.textContent = 'このプルダウンで選ぶと、その場でトークンを発行して値を埋め込みます。';
   } else if (!tokenId) {
-    note.textContent = 'APIトークンの発行は管理者のみ行えます。発行済みの値を管理者から受け取って置き換えてください。';
-  } else if (token === TOKEN_PLACEHOLDER) {
+    note.textContent = 'APIトークンの発行は管理者のみ行えます。実行時に入力する方法を選ぶか、管理者にトークンの発行を依頼してください。';
+  } else if (!token) {
     note.textContent = 'トークンの値は発行時にしか表示されないため、ここでは埋め込めません。控えがなければ新規発行を選んでください。';
   } else {
     note.textContent = '発行したトークンを埋め込んでいます。この画面を離れると再表示できません。';
   }
 
+  // トークンを埋め込まない場合は --token / -Token を省略し、実行時に入力してもらう
   document.getElementById('cmd-text').textContent = os === 'windows'
     ? `curl.exe -O ${SCRIPT_BASE_URL}/hw_to_csv.ps1\n`
-      + `powershell -ExecutionPolicy Bypass -File .\\hw_to_csv.ps1 -Push -Url ${url} -Token ${token} -Server ${server}`
+      + `powershell -ExecutionPolicy Bypass -File .\\hw_to_csv.ps1 -Push -Url ${url}${token ? ` -Token ${token}` : ''}`
     : `curl -O ${SCRIPT_BASE_URL}/hw_to_csv.py\n`
-      + `${useSudo ? 'sudo ' : ''}python3 hw_to_csv.py --push --url ${url} --token ${token} --server ${server}`;
+      + `${useSudo ? 'sudo ' : ''}python3 hw_to_csv.py --push --url ${url}${token ? ` --token ${token}` : ''}`;
 }
 
-['cmd-os', 'cmd-server', 'cmd-url', 'cmd-sudo'].forEach((id) => {
+['cmd-os', 'cmd-url', 'cmd-sudo'].forEach((id) => {
   document.getElementById(id).addEventListener('input', renderCommand);
   document.getElementById(id).addEventListener('change', renderCommand);
 });
@@ -2210,15 +2265,13 @@ async function issueTokenForSync() {
   const tokenSelect = document.getElementById('cmd-token');
   const errEl = document.getElementById('cmd-token-err');
   errEl.hidden = true;
-  const server = document.getElementById('cmd-server').value;
-  const label = (server && server !== '__new_server__') ? server : 'script';
 
   tokenSelect.disabled = true;
   renderCommand();
   try {
     const res = await api('/api/auth/tokens', {
       method: 'POST',
-      body: JSON.stringify({ name: `${label} (構成同期)` }),
+      body: JSON.stringify({ name: `構成同期 ${new Date().toLocaleDateString('ja-JP')}` }),
     });
     issuedTokens.set(String(res.id), res.token);
     const option = document.createElement('option');
@@ -2237,26 +2290,18 @@ async function issueTokenForSync() {
   }
 }
 
-// 対象サーバーの選択肢からそのままサーバーを登録できるようにする
-let syncServerPrevValue = '';
-let syncAwaitingNewServer = false;
+// 未割り当てレポートのサーバー選択欄から、その場でサーバーを新規登録できるようにする
+// （どのレポートから開いたかを覚えておき、登録できたらそのレポートの選択欄に反映する）
+let pendingServerReportId = null;
 
-document.getElementById('cmd-server').addEventListener('change', (e) => {
-  if (e.target.value !== '__new_server__') {
-    syncServerPrevValue = e.target.value;
-    return;
-  }
-  syncAwaitingNewServer = true;
-  openServerDialog(null);
-});
-
-// 登録せずに閉じた場合は選択を元に戻す
 registerAfterClose(document.getElementById('dlg-server'), () => {
-  if (!syncAwaitingNewServer) return;
-  syncAwaitingNewServer = false;
-  const select = document.getElementById('cmd-server');
-  select.value = syncServerPrevValue || (select.options[0] ? select.options[0].value : '');
-  renderCommand();
+  // 作成せずに閉じた場合は選択をプルダウンの先頭に戻す
+  if (pendingServerReportId === null) return;
+  const select = document.querySelector(`[data-unassigned-server-select="${pendingServerReportId}"]`);
+  pendingServerReportId = null;
+  if (select && select.value === '__new_server__') {
+    select.value = select.options[0] ? select.options[0].value : '';
+  }
 });
 
 async function copyText(text) {
@@ -2290,22 +2335,39 @@ function partLabel(p) {
     + (bits.length ? `<br /><span class="sync-meta">${escapeHtml(bits.join(' / '))}</span>` : '');
 }
 
-function syncGroupHtml({ cls, title, items, renderItem }) {
+function syncGroupHtml({ cls, title, groupKey, items, defaultChecked = true, renderItem }) {
   if (!items.length) return '';
+  const selectAll = (groupKey && items.length > 1)
+    ? `<label class="sync-group-selectall">
+        <input type="checkbox" ${defaultChecked ? 'checked' : ''} data-group-selectall="${groupKey}" /> 全て選択
+      </label>`
+    : '';
   return `<div class="sync-group ${cls}">
-    <h4>${title}（${items.length}件）</h4>
+    <div class="sync-group-head">
+      <h4>${title}（${items.length}件）</h4>
+      ${selectAll}
+    </div>
     ${items.map(renderItem).join('')}
   </div>`;
 }
 
+// グループ内の select-all チェックボックスに応じて、そのグループ内の各チェックボックスを揃える
+function wireGroupSelectAll(container) {
+  container.querySelectorAll('[data-group-selectall]').forEach((all) => {
+    all.addEventListener('change', () => {
+      const group = all.closest('.sync-group');
+      group.querySelectorAll('input[type="checkbox"]:not([data-group-selectall])').forEach((cb) => {
+        cb.checked = all.checked;
+      });
+    });
+  });
+}
+
 function renderSyncReports() {
   const wrap = document.getElementById('sync-reports');
-  document.getElementById('sync-empty').hidden = syncReports.length > 0;
-  const badge = document.getElementById('sync-badge');
-  badge.textContent = syncReports.length;
-  badge.hidden = syncReports.length === 0;
+  const assignedReports = syncReports.filter((r) => !r.needs_server);
 
-  wrap.innerHTML = syncReports.map((report) => {
+  wrap.innerHTML = assignedReports.map((report) => {
     const d = report.diff;
     return `<div class="sync-report" data-report="${report.id}">
       <div class="sync-report-head">
@@ -2316,6 +2378,7 @@ function renderSyncReports() {
       ${syncGroupHtml({
         cls: 'remove',
         title: '実機に見つからない（取り外す）',
+        groupKey: `remove-${report.id}`,
         items: d.to_remove,
         renderItem: (item) => `<label class="sync-item">
           <input type="checkbox" data-sync-remove="${item.assignment_id}" checked />
@@ -2326,6 +2389,7 @@ function renderSyncReports() {
       ${syncGroupHtml({
         cls: 'assign',
         title: '在庫に一致するものがある（割り当てる）',
+        groupKey: `assign-${report.id}`,
         items: d.to_assign,
         renderItem: (item) => `<label class="sync-item">
           <input type="checkbox" data-sync-assign="${item.part_id}" checked />
@@ -2336,7 +2400,9 @@ function renderSyncReports() {
       ${syncGroupHtml({
         cls: 'register',
         title: '未登録（内容を確認して登録）',
+        groupKey: `register-${report.id}`,
         items: d.unregistered,
+        defaultChecked: false,
         renderItem: (item, i) => `<label class="sync-item">
           <input type="checkbox" data-sync-register="${i}" />
           <span>${partLabel(item.reported)}</span>
@@ -2356,12 +2422,72 @@ function renderSyncReports() {
       </div>
     </div>`;
   }).join('');
+  wireGroupSelectAll(wrap);
+}
+
+// 未割り当てのレポート（対象サーバーがまだ決まっていないもの）を描画する
+function renderUnassignedReports() {
+  const wrap = document.getElementById('sync-unassigned');
+  const unassigned = syncReports.filter((r) => r.needs_server);
+  const serverOptions = serversCache.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')
+    + '<option value="__new_server__">＋ 新しいサーバーを登録する</option>';
+
+  wrap.innerHTML = unassigned.map((report) => `<div class="sync-report needs-server" data-unassigned-report="${report.id}">
+    <div class="sync-report-head">
+      <h3>${escapeHtml(report.hostname || '(ホスト名不明)')}<span class="unit-label">・対象サーバー未指定</span></h3>
+      <span class="sync-meta">${fmtDateTime(report.created_at)} 受信${report.host_info ? ` / ${escapeHtml(report.host_info)}` : ''}</span>
+    </div>
+
+    <div class="sync-group-head">
+      <h4>受信したパーツ（${report.parts.length}件）</h4>
+      ${report.parts.length > 1
+        ? `<label class="sync-group-selectall">
+            <input type="checkbox" checked data-unassigned-selectall="${report.id}" /> 全て選択
+          </label>`
+        : ''}
+    </div>
+    <div class="sync-parts-list">
+      ${report.parts.map((p, i) => `<label class="sync-item">
+        <input type="checkbox" checked data-unassigned-part="${i}" />
+        <span>${partLabel(p)}</span>
+      </label>`).join('')}
+    </div>
+
+    <div class="sync-assign-row">
+      <label>対象サーバー
+        <select data-unassigned-server-select="${report.id}">${serverOptions}</select>
+      </label>
+      <button type="button" class="primary" data-unassigned-assign="${report.id}">選択したパーツを割り当てる</button>
+      <button type="button" class="secondary" data-unassigned-dismiss="${report.id}">破棄</button>
+    </div>
+    <p class="err-msg" data-unassigned-err="${report.id}" hidden></p>
+  </div>`).join('');
 }
 
 async function loadSyncReports() {
   syncReports = await api('/api/sync/reports');
+  const total = syncReports.length;
+  document.getElementById('sync-empty').hidden = total > 0;
+  const badge = document.getElementById('sync-badge');
+  badge.textContent = total;
+  badge.hidden = total === 0;
+  renderUnassignedReports();
   renderSyncReports();
 }
+
+document.getElementById('tab-sync').addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.dataset.unassignedSelectall !== undefined) {
+    const card = t.closest('[data-unassigned-report]');
+    card.querySelectorAll('[data-unassigned-part]').forEach((cb) => { cb.checked = t.checked; });
+    return;
+  }
+  if (t.dataset.unassignedServerSelect !== undefined) {
+    if (t.value !== '__new_server__') return;
+    pendingServerReportId = Number(t.dataset.unassignedServerSelect);
+    openServerDialog(null);
+  }
+});
 
 document.getElementById('tab-sync').addEventListener('click', async (e) => {
   const t = e.target;
@@ -2419,6 +2545,58 @@ document.getElementById('tab-sync').addEventListener('click', async (e) => {
     } catch (err) {
       errEl.textContent = err.message;
       errEl.hidden = false;
+    }
+    return;
+  }
+
+  if (t.dataset.unassignedDismiss) {
+    const ok = await confirmDialog({
+      title: '未割り当てレポートの破棄',
+      message: '受信したこの構成データを破棄します。よろしいですか？',
+      okLabel: '破棄する',
+    });
+    if (!ok) return;
+    try {
+      await api(`/api/sync/reports/${t.dataset.unassignedDismiss}`, { method: 'DELETE' });
+      await loadSyncReports();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+    return;
+  }
+
+  if (t.dataset.unassignedAssign) {
+    const id = Number(t.dataset.unassignedAssign);
+    const card = t.closest('[data-unassigned-report]');
+    const select = card.querySelector('[data-unassigned-server-select]');
+    const server_id = Number(select.value);
+    const errBox = card.querySelector('[data-unassigned-err]');
+    errBox.hidden = true;
+
+    if (!select.value || select.value === '__new_server__') {
+      errBox.textContent = '対象サーバーを選択してください';
+      errBox.hidden = false;
+      return;
+    }
+    const part_indices = [...card.querySelectorAll('[data-unassigned-part]')]
+      .map((cb, i) => (cb.checked ? i : null))
+      .filter((i) => i !== null);
+    if (!part_indices.length) {
+      errBox.textContent = 'パーツを1件以上選択してください';
+      errBox.hidden = false;
+      return;
+    }
+
+    try {
+      await api(`/api/sync/reports/${id}/assign-server`, {
+        method: 'POST',
+        body: JSON.stringify({ server_id, part_indices }),
+      });
+      await loadSyncReports();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.hidden = false;
     }
   }
 });

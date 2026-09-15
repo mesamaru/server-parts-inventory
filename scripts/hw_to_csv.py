@@ -10,12 +10,16 @@ Dmidex の「CSVから一括登録」でそのまま使える CSV形式で
     # CSVとして出力する
     sudo python3 hw_to_csv.py > parts.csv
 
-    # Dmidex へ構成を送信して差分を作る（自動では反映されない）
-    sudo python3 hw_to_csv.py --push --url http://192.168.1.10:3000 \
-        --token <APIトークン> --server prox04
+    # Dmidex へ構成を送信して差分を作る（自動では反映されない）。
+    # --token を省略すると、実行時に入力を求められる（画面に表示されず、
+    # シェル履歴にも残らない）。
+    sudo python3 hw_to_csv.py --push --url http://192.168.1.10:3000
 
-送信した内容は「構成同期」画面に差分として溜まり、そこで確認して
-反映します（勝手に台帳が書き換わることはありません）。
+送信した内容は「構成同期」画面に「未割り当て」として届きます。パーツを
+確認し、割り当てるものを選んで対象サーバーを選ぶところまでWeb画面で行います
+（送信しただけで台帳が書き換わることはありません）。事前に対象サーバー名が
+分かっていれば --server で指定でき、その場合は名前が完全一致すれば
+自動で割り当てられます。
 
 追加インストール不要（Python3 / dmidecode / lsblk / lspci は
 Proxmox / Debian に標準で入っている）。dmidecode の読み取りに
@@ -23,6 +27,7 @@ root権限が必要なため sudo で実行すること。
 """
 import argparse
 import csv
+import getpass
 import json
 import os
 import re
@@ -36,11 +41,23 @@ import urllib.request
 parser = argparse.ArgumentParser(description="搭載パーツを検出してCSV出力、または Dmidex へ送信する")
 parser.add_argument("--push", action="store_true", help="CSVを出さずに Dmidex へ構成を送信する")
 parser.add_argument("--url", help="Dmidex のURL 例: http://192.168.1.10:3000")
-parser.add_argument("--token", help="設定画面で発行したAPIトークン")
-parser.add_argument("--server", help="登録済みのサーバー名（既定: このホストのhostname）")
+parser.add_argument("--token", help="設定画面で発行したAPIトークン（省略すると実行時に入力を求める）")
+parser.add_argument("--server", help="既存サーバー名と完全一致すれば自動で割り当てる（省略可・任意）")
 args = parser.parse_args()
-if args.push and (not args.url or not args.token):
-    parser.error("--push には --url と --token が必要です")
+
+if args.push:
+    if not args.url:
+        try:
+            args.url = input("Dmidex のURL（例: http://192.168.1.10:3000）: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            args.url = ""
+    if not args.token:
+        try:
+            args.token = getpass.getpass("APIトークン: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            args.token = ""
+    if not args.url or not args.token:
+        parser.error("--push には URL とAPIトークンが必要です")
 
 if os.geteuid() != 0:
     print(
@@ -278,10 +295,11 @@ if sys_info:
     ).strip()
 
 
-def push_report(base_url, token, server_name):
+def push_report(base_url, token, server_name, hostname):
     """検出した構成を Dmidex へ送信する。反映はWeb画面で確認してから行う。"""
     payload = json.dumps({
         "server_name": server_name,
+        "hostname": hostname,
         "host_info": host_summary,
         "parts": rows,
     }).encode("utf-8")
@@ -308,15 +326,19 @@ def push_report(base_url, token, server_name):
 
 
 if args.push:
-    target = args.server or socket.gethostname()
-    result = push_report(args.url, args.token, target)
-    summary = result.get("summary", {})
-    print(f"「{result.get('server')}」に{len(rows)}件の構成を送信しました。")
-    print(
-        f"  一致: {summary.get('matched', 0)}件 / 在庫から割り当て候補: {summary.get('to_assign', 0)}件 / "
-        f"未登録: {summary.get('unregistered', 0)}件 / 取り外し候補: {summary.get('to_remove', 0)}件"
-    )
-    print("  Web画面の「構成同期」タブで内容を確認して反映してください。")
+    hostname = socket.gethostname()
+    result = push_report(args.url, args.token, args.server or "", hostname)
+    if result.get("needs_server"):
+        print(f"{result.get('parts_count', len(rows))}件の構成を送信しました（対象サーバー未指定）。")
+        print("  Web画面の「構成同期」タブでパーツを確認し、対象サーバーを選んで割り当ててください。")
+    else:
+        summary = result.get("summary", {})
+        print(f"「{result.get('server')}」に{len(rows)}件の構成を送信しました。")
+        print(
+            f"  一致: {summary.get('matched', 0)}件 / 在庫から割り当て候補: {summary.get('to_assign', 0)}件 / "
+            f"未登録: {summary.get('unregistered', 0)}件 / 取り外し候補: {summary.get('to_remove', 0)}件"
+        )
+        print("  Web画面の「構成同期」タブで内容を確認して反映してください。")
 else:
     writer = csv.DictWriter(sys.stdout, fieldnames=CSV_COLUMNS, lineterminator="\n")
     writer.writeheader()

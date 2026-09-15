@@ -188,12 +188,22 @@
   <section id="tab-servers" class="tab-panel">
     <div class="toolbar">
       <input id="servers-search" type="search" placeholder="検索（サーバー名・設置場所）" />
+      <div class="view-switch" id="servers-view-switch">
+        <button type="button" class="view-switch-btn active" data-view="simple">簡易表示</button>
+        <button type="button" class="view-switch-btn" data-view="detail">詳細表示</button>
+      </div>
       <button id="btn-new-server" class="primary">＋ 新規サーバー登録</button>
     </div>
     <div class="table-scroll">
       <table class="data-table">
         <thead>
-          <tr><th>サーバー名</th><th>設置場所</th><th>ステータス</th><th>搭載パーツ数</th><th>操作</th></tr>
+          <tr id="servers-thead-row">
+            <th>サーバー名</th><th>設置場所</th><th>ステータス</th><th>搭載パーツ数</th>
+            <th class="detail-col" hidden>CPU</th>
+            <th class="detail-col" hidden>メモリ</th>
+            <th class="detail-col" hidden>ストレージ</th>
+            <th>操作</th>
+          </tr>
         </thead>
         <tbody id="servers-tbody"></tbody>
       </table>
@@ -206,7 +216,9 @@
     <div class="settings-section">
       <h2>構成同期</h2>
       <p class="info-line">
-        対象マシンで検出スクリプトを実行すると、実機の構成がここに届きます。内容を確認して反映するまで台帳は変更されません。
+        対象マシンで検出スクリプトを実行すると、実機の構成がここに届きます。対象サーバーは送信時に
+        指定する必要はありません — 届いた内容を確認してから、下の一覧でパーツを選んで対象サーバーを
+        選択してください。
       </p>
 
       <div class="cmd-builder">
@@ -216,9 +228,6 @@
               <option value="linux">Proxmox / Linux</option>
               <option value="windows">Windows</option>
             </select>
-          </label>
-          <label>対象サーバー
-            <select id="cmd-server"></select>
           </label>
           <label>DmidexのURL
             <input id="cmd-url" />
@@ -241,6 +250,8 @@
 
       <p class="err-msg" id="sync-err" hidden></p>
     </div>
+
+    <div id="sync-unassigned"></div>
     <div id="sync-reports"></div>
     <p id="sync-empty" class="empty-msg" hidden>未処理の構成レポートはありません。</p>
   </section>
@@ -450,13 +461,12 @@
       <input id="server-location" placeholder="例: ラックA-3" />
     </label>
     <label>ステータス
-      <input id="server-status" list="server-status-options" placeholder="例: 稼働中" />
-      <datalist id="server-status-options">
-        <option value="稼働中"></option>
-        <option value="停止中"></option>
-        <option value="メンテナンス中"></option>
-        <option value="廃止"></option>
-      </datalist>
+      <select id="server-status">
+        <option value="稼働中">稼働中</option>
+        <option value="停止中">停止中</option>
+        <option value="メンテナンス中">メンテナンス中</option>
+        <option value="廃止">廃止</option>
+      </select>
     </label>
     <label>備考
       <textarea id="server-notes" rows="2"></textarea>

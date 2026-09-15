@@ -7,12 +7,57 @@ const { encrypt, decrypt } = require('../secret-store');
 const { collectOverSsh, csvToParts } = require('../ssh-collect');
 const { computeDiff, storeReport, summarizeDiff } = require('../sync-core');
 
+// あるサーバーに現在割り当てられているパーツの一覧（詳細画面・簡易サマリの両方で使う）
+function getCurrentConfig(db, serverId) {
+  return db.assignments
+    .filter((a) => a.server_id === serverId && a.removed_at === null)
+    .map((a) => {
+      const part = db.parts.find((p) => p.id === a.part_id);
+      return {
+        assignment_id: a.id,
+        part_id: a.part_id,
+        category: part ? part.category : a.part_category_snapshot,
+        name: part ? part.name : a.part_name_snapshot,
+        spec: part ? part.spec : '',
+        serial_number: part ? part.serial_number : '',
+        installed_at: a.installed_at,
+        notes: a.notes,
+        part_deleted: !part,
+      };
+    })
+    .sort((a, b) => a.category.localeCompare(b.category, 'ja') || a.name.localeCompare(b.name, 'ja'));
+}
+
+// スペック文字列の先頭付近にある容量表記(GB/TB)を拾う。厳密な解析はせず一覧表示用の目安として使う。
+function parseGB(spec) {
+  const gb = String(spec || '').match(/(\d+(?:\.\d+)?)\s*GB/i);
+  if (gb) return parseFloat(gb[1]);
+  const tb = String(spec || '').match(/(\d+(?:\.\d+)?)\s*TB/i);
+  if (tb) return parseFloat(tb[1]) * 1024;
+  return null;
+}
+
+// 一覧の「詳細表示」用に、CPU/メモリ/ストレージだけをざっくり要約する
+function summarizeHardware(config) {
+  const cpu = config.filter((p) => p.category === 'CPU').map((p) => ({ name: p.name, spec: p.spec }));
+  const memoryParts = config.filter((p) => p.category === 'メモリ');
+  const memorySizes = memoryParts.map((p) => parseGB(p.spec));
+  const memoryTotal = memorySizes.reduce((sum, v) => sum + (v || 0), 0);
+  const storage = config.filter((p) => p.category === 'ストレージ').map((p) => ({ name: p.name, spec: p.spec }));
+  return {
+    cpu,
+    memory: { total_gb: memoryTotal, items: memorySizes, count: memoryParts.length },
+    storage,
+  };
+}
+
 function decorate(db, server) {
-  const active = db.assignments.filter((a) => a.server_id === server.id && a.removed_at === null);
+  const config = getCurrentConfig(db, server.id);
   const { ssh, ...rest } = server;
   return {
     ...rest,
-    current_parts_count: active.length,
+    current_parts_count: config.length,
+    hardware: summarizeHardware(config),
     // 秘密情報(password/private_key/passphrase)は絶対に返さない。設定済みかどうかだけ伝える。
     ssh: ssh ? {
       configured: true,
@@ -45,23 +90,7 @@ router.get('/:id', (req, res) => {
   const server = findActiveServer(db, req.params.id);
   if (!server) return res.status(404).json({ error: 'サーバーが見つかりません' });
 
-  const currentConfig = db.assignments
-    .filter((a) => a.server_id === server.id && a.removed_at === null)
-    .map((a) => {
-      const part = db.parts.find((p) => p.id === a.part_id);
-      return {
-        assignment_id: a.id,
-        part_id: a.part_id,
-        category: part ? part.category : a.part_category_snapshot,
-        name: part ? part.name : a.part_name_snapshot,
-        spec: part ? part.spec : '',
-        serial_number: part ? part.serial_number : '',
-        installed_at: a.installed_at,
-        notes: a.notes,
-        part_deleted: !part,
-      };
-    })
-    .sort((a, b) => a.category.localeCompare(b.category, 'ja') || a.name.localeCompare(b.name, 'ja'));
+  const currentConfig = getCurrentConfig(db, server.id);
 
   const history = db.assignments
     .filter((a) => a.server_id === server.id)

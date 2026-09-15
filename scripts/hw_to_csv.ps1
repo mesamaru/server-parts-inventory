@@ -21,20 +21,29 @@
     .\hw_to_csv.ps1 -OutFile parts.csv
 
 .EXAMPLE
-    # Dmidex へ構成を送信する
-    .\hw_to_csv.ps1 -Push -Url https://dmidex.nuids.duckdns.org -Token <APIトークン> -Server win01
+    # Dmidex へ構成を送信する（-Token を省略すると実行時に入力を求められる）
+    .\hw_to_csv.ps1 -Push -Url https://dmidex.nuids.duckdns.org
 #>
 [CmdletBinding()]
 param(
     [switch]$Push,
     [string]$Url,
     [string]$Token,
-    [string]$Server = $env:COMPUTERNAME,
+    [string]$Server = '',
     [string]$OutFile
 )
 
-if ($Push -and (-not $Url -or -not $Token)) {
-    throw "-Push には -Url と -Token が必要です"
+if ($Push) {
+    if (-not $Url) { $Url = Read-Host 'Dmidex のURL (例: https://dmidex.example.com)' }
+    if (-not $Token) {
+        $secureToken = Read-Host 'APIトークン' -AsSecureString
+        $Token = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+        )
+    }
+    if (-not $Url -or -not $Token) {
+        throw '-Push には URL とAPIトークンが必要です'
+    }
 }
 
 # dmidecode/WMIが返すベンダー表記を、アプリのメーカートグルと揃った短い表記に寄せる
@@ -194,6 +203,7 @@ $hostInfo = "$(Get-CleanValue $system.Manufacturer) $(Get-CleanValue $system.Mod
 if ($Push) {
     $payload = @{
         server_name = $Server
+        hostname    = $env:COMPUTERNAME
         host_info   = $hostInfo
         parts       = @($rows | ForEach-Object { [PSCustomObject]$_ })
     } | ConvertTo-Json -Depth 5
@@ -213,10 +223,15 @@ if ($Push) {
         exit 1
     }
 
-    Write-Host "「$($response.server)」に$($rows.Count)件の構成を送信しました。"
-    Write-Host ("  一致: {0}件 / 在庫から割り当て候補: {1}件 / 未登録: {2}件 / 取り外し候補: {3}件" -f `
-        $response.summary.matched, $response.summary.to_assign, $response.summary.unregistered, $response.summary.to_remove)
-    Write-Host "  Web画面の「構成同期」タブで内容を確認して反映してください。"
+    if ($response.needs_server) {
+        Write-Host "$($rows.Count)件の構成を送信しました（対象サーバー未指定）。"
+        Write-Host "  Web画面の「構成同期」タブでパーツを確認し、対象サーバーを選んで割り当ててください。"
+    } else {
+        Write-Host "「$($response.server)」に$($rows.Count)件の構成を送信しました。"
+        Write-Host ("  一致: {0}件 / 在庫から割り当て候補: {1}件 / 未登録: {2}件 / 取り外し候補: {3}件" -f `
+            $response.summary.matched, $response.summary.to_assign, $response.summary.unregistered, $response.summary.to_remove)
+        Write-Host "  Web画面の「構成同期」タブで内容を確認して反映してください。"
+    }
 }
 else {
     $csv = @($rows | ForEach-Object { [PSCustomObject]$_ }) | ConvertTo-Csv -NoTypeInformation

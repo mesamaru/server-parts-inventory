@@ -78,24 +78,32 @@ function normalizeParts(parts) {
 }
 
 // レポートを作って保存する（差分計算はしない。呼び出し側が必要ならcomputeDiffを呼ぶ）。
-// 同じサーバーの未処理レポートは最新のものだけ残す。db.writeDB は呼び出し側の責任。
-function storeReport(db, req, { server, host_info, parts, source }) {
+// server が無い場合は「未割り当て」のまま保存する（Web側でサーバーを選んでもらう）。
+// 同じサーバー（または同じhostnameの未割り当て分）の未処理レポートは最新のものだけ残す。
+// db.writeDB は呼び出し側の責任。
+function storeReport(db, req, { server, hostname, host_info, parts, source }) {
   const normalized = normalizeParts(parts);
+  const cleanHostname = String(hostname || '').trim();
   const report = {
     id: nextId(db, 'sync_reports'),
-    server_id: server.id,
-    server_name: server.name,
+    server_id: server ? server.id : null,
+    server_name: server ? server.name : null,
+    hostname: cleanHostname,
     host_info: String(host_info || '').trim(),
     created_at: new Date().toISOString(),
     parts: normalized,
   };
-  db.sync_reports = db.sync_reports.filter((r) => r.server_id !== server.id);
+  if (server) {
+    db.sync_reports = db.sync_reports.filter((r) => r.server_id !== server.id);
+  } else if (cleanHostname) {
+    db.sync_reports = db.sync_reports.filter((r) => !(r.server_id === null && r.hostname === cleanHostname));
+  }
   db.sync_reports.push(report);
   logAction(db, req, {
     action: 'sync.report',
     target_type: 'server',
-    target_id: server.id,
-    target_name: server.name,
+    target_id: server ? server.id : null,
+    target_name: server ? server.name : (cleanHostname || '(未割り当て)'),
     detail: `${normalized.length}件の構成を受信（${source || '手動送信'}）`,
   });
   return report;

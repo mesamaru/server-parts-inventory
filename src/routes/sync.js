@@ -5,27 +5,37 @@ const { logAction, activeParts, activeServers, findActiveServer } = require('../
 const { computeDiff, storeReport, summarizeDiff } = require('../sync-core');
 
 // Proxmoxホスト等からの構成送信。APIトークンでもセッションでも受け付ける。
+// server_name は「分かれば自動で割り当てる」ための任意ヒント。一致しない/未指定でもエラーにはせず、
+// 「未割り当て」として受け付ける（Web側の構成同期タブでサーバーを選んで割り当てる）。
 router.post('/report', (req, res) => {
   const db = readDB();
-  const { server_name, host_info, parts } = req.body || {};
-  if (!server_name || !String(server_name).trim()) {
-    return res.status(400).json({ error: 'server_name は必須です' });
-  }
+  const { server_name, hostname, host_info, parts } = req.body || {};
   if (!Array.isArray(parts)) {
     return res.status(400).json({ error: 'parts は配列で送ってください' });
   }
-  const name = String(server_name).trim();
-  const server = activeServers(db).find((s) => s.name === name);
-  if (!server) {
-    return res.status(404).json({
-      error: `サーバー「${name}」が登録されていません。先にサーバー一覧から登録してください。`,
-      known_servers: activeServers(db).map((s) => s.name),
-    });
-  }
 
-  const report = storeReport(db, req, { server, host_info, parts, source: 'スクリプト送信' });
+  // 一致判定には server_name（明示的な指定）だけを使う。表示用のホスト名は
+  // 実機の hostname を優先し、無ければ server_name にフォールバックする。
+  const matchHint = String(server_name || '').trim();
+  const displayHint = String(hostname || server_name || '').trim();
+  const server = matchHint ? activeServers(db).find((s) => s.name === matchHint) || null : null;
+
+  const report = storeReport(db, req, {
+    server,
+    hostname: displayHint,
+    host_info,
+    parts,
+    source: server ? 'スクリプト送信' : 'スクリプト送信（サーバー未指定）',
+  });
   writeDB(db);
 
+  if (!server) {
+    return res.status(201).json({
+      report_id: report.id,
+      needs_server: true,
+      parts_count: report.parts.length,
+    });
+  }
   const diff = computeDiff(db, report);
   res.status(201).json({
     report_id: report.id,
@@ -37,17 +47,71 @@ router.post('/report', (req, res) => {
 router.get('/reports', (req, res) => {
   const db = readDB();
   res.json(db.sync_reports
-    .filter((r) => findActiveServer(db, r.server_id))
+    .filter((r) => r.server_id === null || findActiveServer(db, r.server_id))
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-    .map((r) => ({
-      id: r.id,
-      server_id: r.server_id,
-      server_name: r.server_name,
-      host_info: r.host_info,
-      created_at: r.created_at,
-      diff: computeDiff(db, r),
-    })));
+    .map((r) => (r.server_id === null
+      ? {
+        id: r.id,
+        server_id: null,
+        needs_server: true,
+        hostname: r.hostname,
+        host_info: r.host_info,
+        created_at: r.created_at,
+        parts: r.parts,
+      }
+      : {
+        id: r.id,
+        server_id: r.server_id,
+        server_name: r.server_name,
+        host_info: r.host_info,
+        created_at: r.created_at,
+        diff: computeDiff(db, r),
+      })));
 });
+
+// 未割り当てのレポートに対象サーバーを割り当てる。part_indices を指定すると、
+// 受信したパーツのうち選んだものだけを残して以降の差分計算に使う（一括選択）。
+router.post('/reports/:id/assign-server', (req, res) => {
+  const db = readDB();
+  const report = db.sync_reports.find((r) => r.id === Number(req.params.id));
+  if (!report) return res.status(404).json({ error: 'レポートが見つかりません' });
+  if (report.server_id !== null) return res.status(400).json({ error: 'このレポートは既にサーバーへ割り当て済みです' });
+
+  const { server_id, part_indices } = req.body || {};
+  const server = findActiveServer(db, server_id);
+  if (!server) return res.status(400).json({ error: 'サーバーが見つかりません' });
+
+  if (Array.isArray(part_indices)) {
+    const keep = new Set(part_indices.map(Number));
+    report.parts = report.parts.filter((_, i) => keep.has(i));
+  }
+  if (!report.parts.length) {
+    return res.status(400).json({ error: '割り当てるパーツが1件もありません（すべて除外されています）' });
+  }
+
+  report.server_id = server.id;
+  report.server_name = server.name;
+  db.sync_reports = db.sync_reports.filter((r) => r.id === report.id || r.server_id !== server.id);
+  logAction(db, req, {
+    action: 'sync.assign_server',
+    target_type: 'server',
+    target_id: server.id,
+    target_name: server.name,
+    detail: `未割り当てレポート（${report.hostname || '不明なホスト'}）を割り当て`,
+  });
+  writeDB(db);
+
+  const diff = computeDiff(db, report);
+  res.json({
+    id: report.id,
+    server_id: report.server_id,
+    server_name: report.server_name,
+    host_info: report.host_info,
+    created_at: report.created_at,
+    diff,
+  });
+});
+
 
 router.post('/reports/:id/apply', (req, res) => {
   const db = readDB();
@@ -136,7 +200,7 @@ router.delete('/reports/:id', (req, res) => {
     action: 'sync.dismiss',
     target_type: 'server',
     target_id: report.server_id,
-    target_name: report.server_name,
+    target_name: report.server_name || report.hostname || '(未割り当て)',
     detail: '差分を破棄',
   });
   writeDB(db);
