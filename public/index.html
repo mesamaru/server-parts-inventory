@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>サーバーパーツ在庫管理</title>
+<title>Dmidex — サーバーパーツ在庫管理</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 <!-- ログイン / 初期設定画面 -->
 <div id="auth-screen" hidden>
   <form class="auth-card" id="form-auth">
-    <h1>サーバーパーツ在庫管理</h1>
+    <h1 class="brand">Dmidex</h1>
+    <p class="brand-sub">サーバーパーツ在庫管理</p>
     <p class="info-line" id="auth-lead">ログインしてください。</p>
     <label>ユーザー名
       <input id="auth-username" autocomplete="username" required />
@@ -29,7 +30,7 @@
 <div id="app-shell" hidden>
 <header class="topbar">
   <div class="topbar-row">
-    <h1>サーバーパーツ在庫管理</h1>
+    <h1 class="brand">Dmidex<span class="brand-note">サーバーパーツ在庫管理</span></h1>
     <div class="topbar-user">
       <span id="current-user"></span>
       <button type="button" class="secondary" id="btn-logout">ログアウト</button>
@@ -197,7 +198,7 @@
     <div class="settings-section">
       <h2>構成同期</h2>
       <p class="info-line">
-        Proxmoxホストで <code>sudo python3 hw_to_csv.py --push --url &lt;このツールのURL&gt; --token &lt;APIトークン&gt; --server &lt;サーバー名&gt;</code>
+        Proxmoxホストで <code>sudo python3 hw_to_csv.py --push --url &lt;DmidexのURL&gt; --token &lt;APIトークン&gt; --server &lt;サーバー名&gt;</code>
         を実行すると、実機の構成がここに届きます。内容を確認して反映するまで台帳は変更されません。
       </p>
       <p class="err-msg" id="sync-err" hidden></p>

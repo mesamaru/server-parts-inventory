@@ -40,6 +40,15 @@ body {
   z-index: 10;
 }
 .topbar h1 { margin: 0 0 12px; font-size: 20px; }
+.brand { letter-spacing: .01em; }
+.brand-note {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 10px;
+  letter-spacing: 0;
+}
+.brand-sub { margin: -6px 0 6px; font-size: 12px; color: var(--text-muted); }
 
 /* ログイン / 初期設定画面 */
 #auth-screen {

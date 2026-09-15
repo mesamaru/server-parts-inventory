@@ -1,8 +1,8 @@
 {
-  "name": "server-parts-inventory",
+  "name": "dmidex",
   "version": "1.0.0",
   "private": true,
-  "description": "サーバー関連パーツの在庫・割り当て・構成管理ツール",
+  "description": "Dmidex - サーバー関連パーツの在庫・割り当て・構成管理ツール",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

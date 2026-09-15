@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
+Dmidex 用のハードウェア検出スクリプト。
+
 Proxmox（や一般のLinuxホスト）に搭載されているパーツを検出し、
-server-parts-inventory の「CSVから一括登録」でそのまま使える
-CSV形式で標準出力に書き出す。
+Dmidex の「CSVから一括登録」でそのまま使える CSV形式で
+標準出力に書き出す。
 
 使い方:
     # CSVとして出力する
     sudo python3 hw_to_csv.py > parts.csv
 
-    # 在庫管理ツールへ構成を送信して差分を作る（自動では反映されない）
+    # Dmidex へ構成を送信して差分を作る（自動では反映されない）
     sudo python3 hw_to_csv.py --push --url http://192.168.1.10:3000 \
         --token <APIトークン> --server prox04
 
@@ -31,9 +33,9 @@ import urllib.error
 import urllib.request
 
 
-parser = argparse.ArgumentParser(description="搭載パーツを検出してCSV出力、または在庫管理ツールへ送信する")
-parser.add_argument("--push", action="store_true", help="CSVを出さずに在庫管理ツールへ構成を送信する")
-parser.add_argument("--url", help="在庫管理ツールのURL 例: http://192.168.1.10:3000")
+parser = argparse.ArgumentParser(description="搭載パーツを検出してCSV出力、または Dmidex へ送信する")
+parser.add_argument("--push", action="store_true", help="CSVを出さずに Dmidex へ構成を送信する")
+parser.add_argument("--url", help="Dmidex のURL 例: http://192.168.1.10:3000")
 parser.add_argument("--token", help="設定画面で発行したAPIトークン")
 parser.add_argument("--server", help="登録済みのサーバー名（既定: このホストのhostname）")
 args = parser.parse_args()
@@ -277,7 +279,7 @@ if sys_info:
 
 
 def push_report(base_url, token, server_name):
-    """検出した構成を在庫管理ツールへ送信する。反映はWeb画面で確認してから行う。"""
+    """検出した構成を Dmidex へ送信する。反映はWeb画面で確認してから行う。"""
     payload = json.dumps({
         "server_name": server_name,
         "host_info": host_summary,

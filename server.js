@@ -37,5 +37,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`server-parts-inventory listening on 0.0.0.0:${PORT}`);
+  console.log(`Dmidex listening on 0.0.0.0:${PORT}`);
 });
