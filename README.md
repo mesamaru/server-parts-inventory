@@ -12,7 +12,7 @@ Node.js 単体で動作し、外部DBやネイティブモジュールのビル�
 ## 機能
 
 - ログイン認証（アカウント管理・APIトークン）
-- 実機構成の送信と差分確認（構成同期）
+- 実機構成の送信と差分確認（構成同期・Proxmox / Linux / Windows 対応）
 - ゴミ箱（削除したパーツ・サーバーの復元）と操作履歴（監査ログ）
 - ダッシュボード（在庫サマリ・カテゴリ別内訳・保証期限アラート・最近の変更）
 - パーツ一覧の登録・編集・削除（カテゴリ／型番／スペック／シリアル番号／購入日／保証期限／ステータス／写真）
@@ -69,42 +69,86 @@ npm start
   発行できます。発行時に一度だけ表示されるので控えてください。
   リクエストには `Authorization: Bearer <トークン>` を付けます。
 
-> Cookieに`Secure`属性は付けていません（PterodactylではHTTPで公開されることが多いため）。
-> インターネットに直接公開する場合は、リバースプロキシでHTTPS化することを推奨します。
+> Cookieに`Secure`属性は付けていません（PterodactylではHTTPで公開されることが多く、
+> 付けるとHTTP経由でログインできなくなるため）。インターネットに公開する場合は、
+> リバースプロキシでHTTPS化してください。
+>
+> 運用中のURL: `https://dmidex.nuids.duckdns.org/`（DuckDNS + HTTPS）
 
 **ログインできなくなった場合**: `data/db.json` をパネルのファイルマネージャーで開き、
 `"users": [...]` の中身を `"users": []` にして保存・再起動すると、初期設定画面からやり直せます
 （パーツやサーバーのデータはそのまま残ります）。
 
-## Proxmox等の実機からパーツ情報を自動取得する
+## 実機からパーツ情報を取得する
 
-[scripts/hw_to_csv.py](scripts/hw_to_csv.py) を対象サーバー（Proxmoxホスト等）で実行すると、
+対象マシンでスクリプトを実行すると、搭載パーツを検出してCSVを出力します。
+OSごとに使うスクリプトが違うだけで、出力するCSVの形式と使い方は共通です。
+
+| OS | スクリプト | 必要なもの |
+| --- | --- | --- |
+| Proxmox / Linux | [scripts/hw_to_csv.py](scripts/hw_to_csv.py) | Python3・dmidecode・lsblk・lspci（いずれもProxmox/Debianに標準搭載） |
+| Windows | [scripts/hw_to_csv.ps1](scripts/hw_to_csv.ps1) | PowerShell（Windows標準搭載） |
+
+### Proxmox / Linux
+
 `dmidecode` / `lsblk` / `lspci` から CPU・メモリ（DIMM単位）・ストレージ・マザーボード・
-GPU/NIC/RAIDカード・（対応機種のみ）電源を検出し、下記のCSV一括登録フォーマットで
-標準出力に書き出します。Python3 と dmidecode/lsblk/lspci はProxmox/Debianに標準で
-入っているため追加インストールは不要です。
+GPU/NIC/RAIDカード・（対応機種のみ）電源を検出します。
+dmidecodeの読み取りにroot権限が必要なため `sudo`（または root ユーザー）で実行してください。
 
 ```bash
-scp scripts/hw_to_csv.py root@対象サーバー:/root/
-ssh root@対象サーバー
+# スクリプトを取得して実行する
+curl -O https://raw.githubusercontent.com/mesamaru/server-parts-inventory/main/scripts/hw_to_csv.py
 sudo python3 hw_to_csv.py > parts.csv
-cat parts.csv   # 内容を確認してコピーし、CSVから一括登録に貼り付け
+cat parts.csv   # 内容を確認してコピーし、「CSVから一括登録」に貼り付け
 ```
 
-dmidecodeの読み取りにroot権限が必要なため `sudo`（または root ユーザー）で実行してください。
+### Windows
+
+CIM/WMI から CPU・メモリ（スロット単位）・ストレージ・マザーボード・GPU・NIC を検出します。
+シリアル番号の一部は管理者権限がないと取得できないため、**管理者としてPowerShellを開いて**
+実行してください。
+
+```powershell
+# スクリプトを取得する
+curl.exe -O https://raw.githubusercontent.com/mesamaru/server-parts-inventory/main/scripts/hw_to_csv.ps1
+
+# 画面にCSVを表示する（そのままコピーして「CSVから一括登録」に貼り付け）
+powershell -ExecutionPolicy Bypass -File .\hw_to_csv.ps1
+
+# ファイルに保存する場合（Excelで開けるUTF-8 BOM付き）
+powershell -ExecutionPolicy Bypass -File .\hw_to_csv.ps1 -OutFile parts.csv
+```
+
+GPUは仮想ディスプレイドライバを除外し、PCI接続の実デバイスのみを対象にします。
+ノートPCのようにメモリがオンボード実装の機種では、DIMMスロットではなくメモリコントローラ
+単位（Controller0-ChannelA 等）で列挙されます。
+
+### 共通の注意
+
 CPU・メモリ・電源のシリアル番号がBIOS/ファームウェア側で設定されていない機体
-（家庭用PCの流用等）では、シリアル番号欄が空になることがあります。
+（家庭用PCの流用等）では、シリアル番号欄が空、または `00000000` になることがあります。
+この場合、構成同期の同一判定はカテゴリ・名称・スペックで行われます。
 
 ## 構成同期（実機と台帳の差分確認）
 
-同じスクリプトに `--push` を付けると、CSVを経由せず実機の構成をツールへ送信できます。
-**送信しただけでは台帳は変わりません。**「構成同期」タブで差分を確認し、反映する項目を選んで適用します。
+同じスクリプトに `--push`（Windowsは `-Push`）を付けると、CSVを経由せず実機の構成を
+Dmidex へ送信できます。**送信しただけでは台帳は変わりません。**
+「構成同期」タブで差分を確認し、反映する項目を選んで適用します。
 
 ```bash
+# Proxmox / Linux
 sudo python3 hw_to_csv.py --push \
-  --url http://192.168.1.10:3000 \
+  --url https://dmidex.nuids.duckdns.org \
   --token <設定タブで発行したAPIトークン> \
   --server prox04          # 省略時はこのホストのhostname
+```
+
+```powershell
+# Windows（管理者として実行）
+powershell -ExecutionPolicy Bypass -File .\hw_to_csv.ps1 -Push `
+  -Url https://dmidex.nuids.duckdns.org `
+  -Token <設定タブで発行したAPIトークン> `
+  -Server win01            # 省略時はこのPCのコンピューター名
 ```
 
 送信すると差分が4つに分類されます。
