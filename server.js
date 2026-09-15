@@ -8,6 +8,7 @@ const authRouter = require('./src/routes/auth');
 const trashRouter = require('./src/routes/trash');
 const auditRouter = require('./src/routes/audit');
 const syncRouter = require('./src/routes/sync');
+const dashboardRouter = require('./src/routes/dashboard');
 const { requireAuth } = require('./src/auth');
 
 const app = express();
@@ -27,6 +28,7 @@ app.use('/api/assignments', requireAuth, assignmentsRouter);
 app.use('/api/trash', requireAuth, trashRouter);
 app.use('/api/audit', requireAuth, auditRouter);
 app.use('/api/sync', requireAuth, syncRouter);
+app.use('/api/dashboard', requireAuth, dashboardRouter);
 
 app.use((err, req, res, next) => {
   console.error(err);

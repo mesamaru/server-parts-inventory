@@ -193,8 +193,9 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
-    // 履歴・構成同期は開いたときに最新を取りに行く
+    // 集計・履歴系は開いたときに最新を取りに行く
     try {
+      if (btn.dataset.tab === 'dashboard') await loadDashboard();
       if (btn.dataset.tab === 'history') await reloadHistoryTab();
       if (btn.dataset.tab === 'sync') await loadSyncReports();
     } catch (err) {
@@ -1588,6 +1589,72 @@ document.getElementById('tokens-tbody').addEventListener('click', async (e) => {
   }
 });
 
+/* ================= ダッシュボード ================= */
+
+async function loadDashboard() {
+  const data = await api('/api/dashboard');
+  const s = data.summary;
+
+  const cards = [
+    { label: '総パーツ数', value: s.total, cls: '' },
+    { label: '在庫', value: s.in_stock, cls: 'accent-stock' },
+    { label: '使用中', value: s.assigned, cls: 'accent-assigned' },
+    { label: '故障', value: s.broken, cls: 'accent-broken' },
+    { label: '廃棄', value: s.retired, cls: '' },
+    { label: 'サーバー', value: s.servers, cls: '' },
+  ];
+  if (s.pending_sync) cards.push({ label: '未処理の構成差分', value: s.pending_sync, cls: 'accent-sync' });
+  if (s.trashed) cards.push({ label: 'ゴミ箱', value: s.trashed, cls: '' });
+
+  document.getElementById('stat-grid').innerHTML = cards.map((c) => `<div class="stat-card ${c.cls}">
+    <div class="stat-label">${c.label}</div>
+    <div class="stat-value">${c.value}</div>
+  </div>`).join('');
+
+  const catWrap = document.getElementById('dash-categories');
+  document.getElementById('dash-categories-empty').hidden = data.categories.length > 0;
+  const legend = `<div class="cat-legend">
+    <span><i style="background:#4ade80"></i>使用中</span>
+    <span><i style="background:#818cf8"></i>在庫</span>
+    <span><i style="background:#f87171"></i>故障</span>
+  </div>`;
+  catWrap.innerHTML = data.categories.length ? legend + data.categories.map((c) => {
+    const pct = (n) => (c.total ? (n / c.total) * 100 : 0);
+    return `<div class="cat-row">
+      <div class="cat-row-head">
+        <span>${escapeHtml(categoryLabel(c.category))}</span>
+        <span class="cat-counts">計${c.total} ／ 使用中${c.assigned} ・ 在庫${c.in_stock}${c.broken ? ` ・ 故障${c.broken}` : ''}</span>
+      </div>
+      <div class="cat-bar">
+        <span class="seg-assigned" style="width:${pct(c.assigned)}%"></span>
+        <span class="seg-stock" style="width:${pct(c.in_stock)}%"></span>
+        <span class="seg-broken" style="width:${pct(c.broken)}%"></span>
+      </div>
+    </div>`;
+  }).join('') : '';
+
+  document.getElementById('dash-servers-empty').hidden = data.servers.length > 0;
+  document.getElementById('dash-servers-tbody').innerHTML = data.servers.map((s2) => `<tr>
+    <td><button class="server-link" data-open-server="${s2.id}">${escapeHtml(s2.name)}</button></td>
+    <td>${escapeHtml(s2.location) || '-'}</td>
+    <td>${escapeHtml(s2.status) || '-'}</td>
+    <td>${s2.parts}</td>
+  </tr>`).join('');
+
+  document.getElementById('dash-recent-empty').hidden = data.recent.length > 0;
+  document.getElementById('dash-recent-tbody').innerHTML = data.recent.map((l) => `<tr>
+    <td>${fmtDateTime(l.at)}</td>
+    <td>${escapeHtml(l.user)}</td>
+    <td>${escapeHtml(ACTION_LABEL[l.action] || l.action)}</td>
+    <td>${escapeHtml(l.target_name) || '-'}</td>
+    <td>${escapeHtml(l.detail) || '-'}</td>
+  </tr>`).join('');
+}
+
+document.getElementById('dash-servers-tbody').addEventListener('click', (e) => {
+  if (e.target.dataset.openServer) openServerDetail(Number(e.target.dataset.openServer));
+});
+
 /* ================= 構成同期 ================= */
 let syncReports = [];
 
@@ -1850,7 +1917,7 @@ document.querySelectorAll('dialog').forEach((dlg) => {
 });
 
 async function refreshAll() {
-  await Promise.all([loadParts(), loadServers(), loadCategories(), loadSyncReports()]);
+  await Promise.all([loadParts(), loadServers(), loadCategories(), loadSyncReports(), loadDashboard()]);
 }
 
 (async () => {
