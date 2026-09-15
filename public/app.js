@@ -40,6 +40,90 @@ function statusIcon(map, key) {
   return `<span class="status-icon ${entry.cls}" role="img" title="${entry.label}" aria-label="${entry.label}">${entry.icon}</span>`;
 }
 
+/* ---------- カテゴリ別の入力補助定義 ---------- */
+// makers: メーカーのトグル候補 / fields: スペックを組み立てる入力欄
+// compose: 入力値から「スペック詳細」の文字列を組み立てる
+const CATEGORY_PRESETS = {
+  CPU: {
+    makers: ['Intel', 'AMD'],
+    fields: [
+      { key: 'cores', label: 'コア数', type: 'number', min: 1, max: 256, step: 1, unit: 'コア' },
+      { key: 'threads', label: 'スレッド数', type: 'number', min: 1, max: 512, step: 1, unit: 'スレッド' },
+      { key: 'clock', label: 'クロック', type: 'number', min: 0, max: 10, step: 0.1, unit: 'GHz' },
+    ],
+    compose: (v) => [
+      [v.cores && `${v.cores}コア`, v.threads && `${v.threads}スレッド`].filter(Boolean).join(' / '),
+      v.clock && `${v.clock}GHz`,
+    ].filter(Boolean).join(' '),
+  },
+  'メモリ': {
+    makers: ['Samsung', 'Micron / Crucial', 'SK hynix', 'Kingston', 'CFD'],
+    fields: [
+      { key: 'capacity', label: '容量', type: 'number', min: 1, max: 1024, step: 1, unit: 'GB' },
+      { key: 'ddr', label: '規格 (DDR)', type: 'number', min: 1, max: 6, step: 1, prefix: 'DDR' },
+      { key: 'speed', label: '速度', type: 'number', min: 100, max: 12800, step: 100, unit: 'MT/s' },
+      { key: 'form', label: '形状', type: 'toggle', options: ['DIMM', 'SODIMM'] },
+      { key: 'ecc', label: 'ECC', type: 'toggle', options: ['ECC', 'non-ECC'] },
+    ],
+    compose: (v) => [
+      v.capacity && `${v.capacity}GB`,
+      v.ddr && `DDR${v.ddr}`,
+      v.speed && `${v.speed}MT/s`,
+      v.form,
+      v.ecc === 'ECC' ? 'ECC' : '',
+    ].filter(Boolean).join(' '),
+  },
+  'ストレージ': {
+    makers: ['Samsung', 'Western Digital', 'Seagate', 'Crucial', 'Kioxia', 'Intel'],
+    fields: [
+      { key: 'capacity', label: '容量', type: 'number', min: 1, max: 100000, step: 1 },
+      { key: 'unit', label: '単位', type: 'toggle', options: ['GB', 'TB'] },
+      { key: 'kind', label: '種別', type: 'toggle', options: ['HDD', 'SSD', 'NVMe'] },
+    ],
+    compose: (v) => [v.capacity && `${v.capacity}${v.unit || 'GB'}`, v.kind].filter(Boolean).join(' '),
+  },
+  GPU: {
+    makers: ['NVIDIA', 'AMD', 'Intel'],
+    fields: [
+      { key: 'vram', label: 'VRAM', type: 'number', min: 1, max: 256, step: 1, unit: 'GB' },
+      { key: 'bus', label: '接続', type: 'toggle', options: ['PCIe x16', 'PCIe x8', 'オンボード'] },
+    ],
+    compose: (v) => [v.vram && `VRAM ${v.vram}GB`, v.bus].filter(Boolean).join(' '),
+  },
+  NIC: {
+    makers: ['Intel', 'Realtek', 'Broadcom', 'Mellanox'],
+    fields: [
+      { key: 'speed', label: '速度', type: 'toggle', options: ['1GbE', '2.5GbE', '10GbE', '25GbE', '40GbE'] },
+      { key: 'ports', label: 'ポート数', type: 'number', min: 1, max: 8, step: 1, unit: 'ポート' },
+    ],
+    compose: (v) => [v.speed, v.ports && `${v.ports}ポート`].filter(Boolean).join(' '),
+  },
+  'マザーボード': {
+    makers: ['ASUS', 'ASRock', 'GIGABYTE', 'MSI', 'Supermicro'],
+    fields: [
+      { key: 'form', label: 'フォームファクタ', type: 'toggle', options: ['ATX', 'MicroATX', 'Mini-ITX', 'E-ATX'] },
+      { key: 'socket', label: 'ソケット', type: 'toggle', options: ['LGA1700', 'LGA1200', 'LGA2011', 'AM4', 'AM5'] },
+    ],
+    compose: (v) => [v.form, v.socket].filter(Boolean).join(' '),
+  },
+  '電源(PSU)': {
+    makers: ['Corsair', 'Seasonic', '玄人志向', 'Antec', 'Thermaltake'],
+    fields: [
+      { key: 'watt', label: '容量', type: 'number', min: 100, max: 2000, step: 50, unit: 'W' },
+      { key: 'rank', label: '80PLUS', type: 'toggle', options: ['Bronze', 'Silver', 'Gold', 'Platinum', 'Titanium'] },
+    ],
+    compose: (v) => [v.watt && `${v.watt}W`, v.rank && `80PLUS ${v.rank}`].filter(Boolean).join(' '),
+  },
+  'RAIDカード': {
+    makers: ['LSI / Broadcom', 'Adaptec', 'Dell PERC', 'HPE Smart Array'],
+    fields: [
+      { key: 'ports', label: 'ポート数', type: 'number', min: 1, max: 32, step: 1, unit: 'ポート' },
+      { key: 'mode', label: 'モード', type: 'toggle', options: ['RAID', 'HBA / IT'] },
+    ],
+    compose: (v) => [v.ports && `${v.ports}ポート`, v.mode].filter(Boolean).join(' '),
+  },
+};
+
 function iconBtn(icon, label, dataAttr, danger = false) {
   return `<button type="button" class="icon-btn${danger ? ' icon-danger' : ''}" title="${label}" aria-label="${label}" ${dataAttr}>${icon}</button>`;
 }
@@ -194,7 +278,7 @@ function renderPartsTable() {
     return `<tr>
       <td data-label=""><input type="checkbox" class="row-check" data-row-check="${p.id}" ${selectedPartIds.has(p.id) ? 'checked' : ''} /></td>
       <td data-label="カテゴリ" class="cell-category">${escapeHtml(p.category)}</td>
-      <td data-label="名称">${escapeHtml(p.name)}</td>
+      <td data-label="名称">${p.maker ? `<span class="maker-tag">${escapeHtml(p.maker)}</span>` : ''}${escapeHtml(p.name)}</td>
       <td data-label="スペック">${escapeHtml(p.spec) || '-'}</td>
       <td data-label="シリアル番号">${escapeHtml(p.serial_number) || '-'}</td>
       <td data-label="ステータス">${statusIcon(STATUS_ICON, p.status)}</td>
@@ -346,13 +430,26 @@ async function openPartServerDialog(partId) {
   document.getElementById('btn-part-server-unassign').hidden = !isAssigned;
 
   if (!serversCache.length) await loadServers();
-  const options = serversCache.filter((s) => s.id !== part.current_server_id);
+  // 登録済みサーバーは常に一覧表示する。現在割り当て中のものは選べないようにするだけ。
   const select = document.getElementById('part-server-select');
   const submitBtn = document.getElementById('btn-part-server-submit');
-  select.innerHTML = options.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-  document.getElementById('part-server-select-label').hidden = !options.length;
+  select.innerHTML = serversCache.map((s) => {
+    const isCurrent = s.id === part.current_server_id;
+    return `<option value="${s.id}"${isCurrent ? ' disabled' : ''}>${escapeHtml(s.name)}${isCurrent ? '（現在割り当て中）' : ''}</option>`;
+  }).join('');
+  const selectable = serversCache.filter((s) => s.id !== part.current_server_id);
+  if (selectable.length) select.value = String(selectable[0].id);
+
   submitBtn.textContent = isAssigned ? '移動する' : '割り当てる';
-  submitBtn.hidden = !options.length;
+  submitBtn.disabled = !selectable.length;
+  const err = document.getElementById('part-server-err');
+  if (!serversCache.length) {
+    err.textContent = 'サーバーが登録されていません。先にサーバー一覧から登録してください。';
+    err.hidden = false;
+  } else if (!selectable.length) {
+    err.textContent = '他に登録済みのサーバーがないため移動できません。';
+    err.hidden = false;
+  }
 
   dlgPartServer.showModal();
 }
@@ -556,11 +653,83 @@ const dlgPart = document.getElementById('dlg-part');
 document.getElementById('btn-new-part').addEventListener('click', () => openPartDialog(null));
 document.getElementById('btn-part-cancel').addEventListener('click', () => dlgPart.close());
 
+/* ---- カテゴリ別の入力補助 ---- */
+let presetMaker = '';
+let presetValues = {};
+
+function renderPartPreset() {
+  const category = document.getElementById('part-category').value.trim();
+  const preset = CATEGORY_PRESETS[category];
+  const makers = preset ? preset.makers : [];
+
+  document.getElementById('part-maker-toggles').innerHTML = [...makers, 'その他'].map((m) =>
+    `<button type="button" class="toggle-btn${presetMaker === m ? ' selected' : ''}" data-maker="${escapeHtml(m)}">${escapeHtml(m)}</button>`
+  ).join('');
+  document.getElementById('part-maker-other').hidden = presetMaker !== 'その他';
+
+  const fieldsGroup = document.getElementById('part-fields-group');
+  const fieldsWrap = document.getElementById('part-preset-fields');
+  if (!preset) {
+    fieldsGroup.hidden = true;
+    fieldsWrap.innerHTML = '';
+    return;
+  }
+  fieldsGroup.hidden = false;
+  fieldsWrap.innerHTML = preset.fields.map((f) => {
+    const inner = f.type === 'toggle'
+      ? `<div class="toggle-row">${f.options.map((o) =>
+          `<button type="button" class="toggle-btn${presetValues[f.key] === o ? ' selected' : ''}" data-preset-toggle="${f.key}" data-preset-value="${escapeHtml(o)}">${escapeHtml(o)}</button>`
+        ).join('')}</div>`
+      : `<div class="num-with-unit">
+          <input type="number" data-preset-num="${f.key}" min="${f.min}" max="${f.max}" step="${f.step}" value="${presetValues[f.key] ?? ''}" />
+          ${f.unit ? `<span class="unit-label">${escapeHtml(f.unit)}</span>` : ''}
+        </div>`;
+    return `<div class="preset-field"><span class="preset-field-label">${escapeHtml(f.label)}</span>${inner}</div>`;
+  }).join('');
+}
+
+function applyPresetToSpec() {
+  const category = document.getElementById('part-category').value.trim();
+  const preset = CATEGORY_PRESETS[category];
+  if (!preset) return;
+  const composed = preset.compose(presetValues);
+  if (composed) document.getElementById('part-spec').value = composed;
+}
+
+document.getElementById('part-category').addEventListener('input', () => {
+  presetValues = {};
+  renderPartPreset();
+});
+
+document.getElementById('part-preset').addEventListener('click', (e) => {
+  const t = e.target;
+  if (t.dataset.maker) {
+    presetMaker = presetMaker === t.dataset.maker ? '' : t.dataset.maker;
+    renderPartPreset();
+    return;
+  }
+  if (t.dataset.presetToggle) {
+    const key = t.dataset.presetToggle;
+    presetValues[key] = presetValues[key] === t.dataset.presetValue ? '' : t.dataset.presetValue;
+    renderPartPreset();
+    applyPresetToSpec();
+  }
+});
+
+document.getElementById('part-preset').addEventListener('input', (e) => {
+  const key = e.target.dataset.presetNum;
+  if (!key) return;
+  presetValues[key] = e.target.value;
+  applyPresetToSpec();
+});
+
 function openPartDialog(id) {
   document.getElementById('part-err').hidden = true;
   document.getElementById('form-part').reset();
   document.getElementById('part-id').value = id || '';
   document.getElementById('part-status').value = 'normal';
+  presetValues = {};
+  presetMaker = '';
   if (id) {
     const p = partsCache.find((x) => x.id === id);
     document.getElementById('part-dlg-title').textContent = 'パーツを編集';
@@ -571,18 +740,28 @@ function openPartDialog(id) {
     document.getElementById('part-status').value = p.status;
     document.getElementById('part-purchase-date').value = p.purchase_date ? p.purchase_date.slice(0, 10) : '';
     document.getElementById('part-notes').value = p.notes;
+    if (p.maker) {
+      const known = (CATEGORY_PRESETS[p.category] || {}).makers || [];
+      presetMaker = known.includes(p.maker) ? p.maker : 'その他';
+      if (presetMaker === 'その他') document.getElementById('part-maker-other').value = p.maker;
+    }
   } else {
     document.getElementById('part-dlg-title').textContent = '新規パーツ登録';
   }
+  renderPartPreset();
   dlgPart.showModal();
 }
 
 document.getElementById('form-part').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('part-id').value;
+  const maker = presetMaker === 'その他'
+    ? document.getElementById('part-maker-other').value.trim()
+    : presetMaker;
   const payload = {
     category: document.getElementById('part-category').value.trim(),
     name: document.getElementById('part-name').value.trim(),
+    maker,
     spec: document.getElementById('part-spec').value.trim(),
     serial_number: document.getElementById('part-serial').value.trim(),
     status: document.getElementById('part-status').value,
@@ -609,6 +788,7 @@ const dlgBulkImport = document.getElementById('dlg-bulk-import');
 const HEADER_ALIASES = {
   category: ['category', 'カテゴリ'],
   name: ['name', '名称', '型番', '品名'],
+  maker: ['maker', 'メーカー', 'ブランド'],
   spec: ['spec', 'スペック', '仕様'],
   serial_number: ['serial_number', 'serial', 'シリアル番号', 'シリアル'],
   status: ['status', 'ステータス', '状態'],
@@ -700,6 +880,7 @@ document.getElementById('btn-bulk-preview').addEventListener('click', () => {
   bulkParsedRows = rows.slice(1).map((cols) => ({
     category: (cols[headerMap.category] || '').trim(),
     name: (cols[headerMap.name] || '').trim(),
+    maker: headerMap.maker !== undefined ? (cols[headerMap.maker] || '').trim() : '',
     spec: headerMap.spec !== undefined ? (cols[headerMap.spec] || '').trim() : '',
     serial_number: headerMap.serial_number !== undefined ? (cols[headerMap.serial_number] || '').trim() : '',
     status: headerMap.status !== undefined ? (cols[headerMap.status] || '').trim() : '',
@@ -887,6 +1068,37 @@ document.getElementById('btn-server-detail-close').addEventListener('click', () 
 dlgServerDetail.addEventListener('close', () => { currentDetailServerId = null; });
 let currentDetailServerId = null;
 
+// 同じカテゴリ・名称・スペックのパーツ（メモリ等）を1行にまとめる
+function groupConfig(config) {
+  const groups = [];
+  const byKey = new Map();
+  config.forEach((c) => {
+    const key = `${c.category}|${c.name}|${c.spec}`;
+    if (!byKey.has(key)) {
+      const group = { items: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    byKey.get(key).items.push(c);
+  });
+  return groups;
+}
+
+function configRowHtml(c, groupId) {
+  const isDetail = !!groupId;
+  return `<tr class="${isDetail ? 'group-detail' : ''}"${isDetail ? ` data-group="${groupId}" hidden` : ''}>
+    <td>${isDetail ? '' : escapeHtml(c.category)}</td>
+    <td>${escapeHtml(c.name)}</td>
+    <td>${escapeHtml(c.spec) || '-'}</td>
+    <td>${escapeHtml(c.serial_number) || '-'}</td>
+    <td>${fmtDate(c.installed_at)}</td>
+    <td><div class="row-actions">
+      ${iconBtn(ICON.unassign, '取り外す', `data-detail-remove="${c.assignment_id}"`)}
+      ${iconBtn(ICON.move, '別サーバーへ移動', `data-detail-move="${c.assignment_id}" data-detail-move-name="${escapeHtml(c.name)}"`)}
+    </div></td>
+  </tr>`;
+}
+
 async function openServerDetail(id) {
   currentDetailServerId = id;
   const s = await api(`/api/servers/${id}`);
@@ -901,17 +1113,18 @@ async function openServerDetail(id) {
     cfgEmpty.hidden = false;
   } else {
     cfgEmpty.hidden = true;
-    cfgBody.innerHTML = s.current_config.map((c) => `<tr>
-      <td>${escapeHtml(c.category)}</td>
-      <td>${escapeHtml(c.name)}</td>
-      <td>${escapeHtml(c.spec) || '-'}</td>
-      <td>${escapeHtml(c.serial_number) || '-'}</td>
-      <td>${fmtDate(c.installed_at)}</td>
-      <td><div class="row-actions">
-        ${iconBtn(ICON.unassign, '取り外す', `data-detail-remove="${c.assignment_id}"`)}
-        ${iconBtn(ICON.move, '別サーバーへ移動', `data-detail-move="${c.assignment_id}" data-detail-move-name="${escapeHtml(c.name)}"`)}
-      </div></td>
-    </tr>`).join('');
+    cfgBody.innerHTML = groupConfig(s.current_config).map((g, gi) => {
+      if (g.items.length === 1) return configRowHtml(g.items[0], null);
+      const groupId = `g${gi}`;
+      const head = g.items[0];
+      const summary = `<tr class="group-row" data-group-toggle="${groupId}">
+        <td><span class="group-toggle-icon">▶</span> ${escapeHtml(head.category)}</td>
+        <td>${escapeHtml(head.name)}<span class="group-count">×${g.items.length}</span></td>
+        <td>${escapeHtml(head.spec) || '-'}</td>
+        <td colspan="3">クリックで内訳を表示</td>
+      </tr>`;
+      return summary + g.items.map((item) => configRowHtml(item, groupId)).join('');
+    }).join('');
   }
 
   const histBody = document.getElementById('server-detail-history-tbody');
@@ -937,6 +1150,13 @@ document.getElementById('server-detail-config-tbody').addEventListener('click', 
   const t = e.target;
   if (t.dataset.detailRemove) return removeAssignment(Number(t.dataset.detailRemove)).then(refreshServerDetail);
   if (t.dataset.detailMove) return openMoveDialog(Number(t.dataset.detailMove), t.dataset.detailMoveName, true);
+  const groupRow = t.closest('[data-group-toggle]');
+  if (groupRow) {
+    const expanded = groupRow.classList.toggle('expanded');
+    document
+      .querySelectorAll(`#server-detail-config-tbody tr[data-group="${groupRow.dataset.groupToggle}"]`)
+      .forEach((row) => { row.hidden = !expanded; });
+  }
 });
 
 async function refreshServerDetail() {
@@ -1037,9 +1257,9 @@ document.getElementById('form-move').addEventListener('submit', async (e) => {
 
 /* ================= 初期化 ================= */
 
-// 閲覧用ダイアログは背景（グレーアウト部分）のクリックでも閉じられるようにする。
+// 背景（グレーアウト部分）のクリックでダイアログを閉じる。
 // dialog要素自身にはpaddingが無く中身は子要素なので、e.targetがdialogなら背景クリック。
-[dlgServerDetail, dlgPartHistory].forEach((dlg) => {
+document.querySelectorAll('dialog').forEach((dlg) => {
   dlg.addEventListener('click', (e) => {
     if (e.target === dlg) dlg.close();
   });

@@ -109,8 +109,19 @@
         <option value="その他"></option>
       </datalist>
     </label>
+    <div id="part-preset">
+      <div class="preset-group">
+        <h4>メーカー</h4>
+        <div class="toggle-row" id="part-maker-toggles"></div>
+        <input id="part-maker-other" placeholder="メーカー名を入力" hidden />
+      </div>
+      <div class="preset-group" id="part-fields-group" hidden>
+        <h4>スペック入力補助<span class="preset-note">（選ぶとスペック詳細に自動入力されます）</span></h4>
+        <div class="preset-fields" id="part-preset-fields"></div>
+      </div>
+    </div>
     <label>名称／型番<span class="req">*</span>
-      <input id="part-name" required placeholder="例: Intel Xeon E5-2680 v4" />
+      <input id="part-name" required placeholder="例: Xeon E5-2680 v4" />
     </label>
     <label>スペック詳細
       <input id="part-spec" placeholder="例: 32GB DDR4 3200MHz" />

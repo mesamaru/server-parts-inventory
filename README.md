@@ -79,6 +79,7 @@ CPU,Intel Xeon E5-2680 v4,14core/28thread 2.4GHz,ABC123,正常,2024-05-01,
 
 - ヘッダーは英語（`category,name,spec,serial_number,status,purchase_date,notes`）でも
   日本語（`カテゴリ,名称,スペック,シリアル番号,ステータス,購入日,備考`）でも認識されます。
+- `maker`（メーカー）列も任意で指定できます。
 - 必須は `category`（カテゴリ）と `name`（名称）のみ。他は空欄可。
 - `status`（ステータス）は 正常/故障/廃棄（英語表記 normal/broken/retired も可）。空欄なら正常。
 - 行ごとにプレビューで検証され、エラーのある行だけ除外して残りを登録できます。

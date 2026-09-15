@@ -52,7 +52,7 @@ router.get('/', (req, res) => {
   if (q) {
     const qq = String(q).toLowerCase();
     parts = parts.filter((p) =>
-      [p.name, p.spec, p.serial_number, p.notes, p.category].some(
+      [p.name, p.spec, p.serial_number, p.notes, p.category, p.maker].some(
         (v) => v && String(v).toLowerCase().includes(qq)
       )
     );
@@ -84,7 +84,7 @@ router.get('/:id', (req, res) => {
 
 router.post('/', (req, res) => {
   const db = readDB();
-  const { category, name, spec, serial_number, status, purchase_date, notes } = req.body || {};
+  const { category, name, maker, spec, serial_number, status, purchase_date, notes } = req.body || {};
   if (!category || !String(category).trim()) return res.status(400).json({ error: 'カテゴリは必須です' });
   if (!name || !String(name).trim()) return res.status(400).json({ error: '名称は必須です' });
   const resolvedStatus = resolveStatus(status);
@@ -94,6 +94,7 @@ router.post('/', (req, res) => {
     id: nextId(db, 'parts'),
     category: String(category).trim(),
     name: String(name).trim(),
+    maker: maker ? String(maker).trim() : '',
     spec: spec ? String(spec).trim() : '',
     serial_number: serial_number ? String(serial_number).trim() : '',
     status: resolvedStatus,
@@ -130,6 +131,7 @@ router.post('/bulk', (req, res) => {
       id: nextId(db, 'parts'),
       category,
       name,
+      maker: raw.maker ? String(raw.maker).trim() : '',
       spec: raw.spec ? String(raw.spec).trim() : '',
       serial_number: raw.serial_number ? String(raw.serial_number).trim() : '',
       status: resolvedStatus,
@@ -208,7 +210,7 @@ router.put('/:id', (req, res) => {
   const db = readDB();
   const part = db.parts.find((p) => p.id === Number(req.params.id));
   if (!part) return res.status(404).json({ error: 'パーツが見つかりません' });
-  const { category, name, spec, serial_number, status, purchase_date, notes } = req.body || {};
+  const { category, name, maker, spec, serial_number, status, purchase_date, notes } = req.body || {};
   let resolvedStatus;
   if (status !== undefined) {
     resolvedStatus = resolveStatus(status);
@@ -216,6 +218,7 @@ router.put('/:id', (req, res) => {
   }
   if (category !== undefined) part.category = String(category).trim();
   if (name !== undefined) part.name = String(name).trim();
+  if (maker !== undefined) part.maker = String(maker).trim();
   if (spec !== undefined) part.spec = String(spec).trim();
   if (serial_number !== undefined) part.serial_number = String(serial_number).trim();
   if (resolvedStatus !== undefined) part.status = resolvedStatus;
