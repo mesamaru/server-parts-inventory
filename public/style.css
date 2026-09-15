@@ -41,7 +41,76 @@ body {
 }
 .topbar h1 { margin: 0 0 12px; font-size: 20px; }
 
+/* ログイン / 初期設定画面 */
+#auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.auth-card {
+  width: min(360px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, .08);
+}
+.auth-card h1 { margin: 0; font-size: 18px; }
+.auth-card label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
+.auth-card input {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  color: var(--text);
+}
+.auth-card button { margin-top: 4px; padding: 10px; }
+
+.topbar-user { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); }
+
+/* 設定タブ */
+.settings-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin-bottom: 18px;
+}
+.settings-section h2 { margin: 0 0 12px; font-size: 15px; }
+.settings-form { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
+.settings-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
+.settings-form input, .settings-form select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  color: var(--text);
+}
+.settings-form.inline-form {
+  flex-direction: row;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  max-width: none;
+  margin-bottom: 12px;
+}
+.token-reveal {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  background: var(--ok-bg);
+  color: var(--ok-text);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  word-break: break-all;
+  margin: 0 0 12px;
+}
+
 .topbar-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.topbar-row h1 { margin: 0; }
 .inline-setting {
   display: inline-flex;
   align-items: center;

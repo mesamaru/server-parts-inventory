@@ -7,12 +7,39 @@
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+<!-- ログイン / 初期設定画面 -->
+<div id="auth-screen" hidden>
+  <form class="auth-card" id="form-auth">
+    <h1>サーバーパーツ在庫管理</h1>
+    <p class="info-line" id="auth-lead">ログインしてください。</p>
+    <label>ユーザー名
+      <input id="auth-username" autocomplete="username" required />
+    </label>
+    <label>パスワード
+      <input id="auth-password" type="password" autocomplete="current-password" required />
+    </label>
+    <label id="auth-password2-label" hidden>パスワード（確認）
+      <input id="auth-password2" type="password" autocomplete="new-password" />
+    </label>
+    <p class="err-msg" id="auth-err" hidden></p>
+    <button type="submit" class="primary" id="btn-auth-submit">ログイン</button>
+  </form>
+</div>
+
+<div id="app-shell" hidden>
 <header class="topbar">
-  <h1>サーバーパーツ在庫管理</h1>
+  <div class="topbar-row">
+    <h1>サーバーパーツ在庫管理</h1>
+    <div class="topbar-user">
+      <span id="current-user"></span>
+      <button type="button" class="secondary" id="btn-logout">ログアウト</button>
+    </div>
+  </div>
   <div class="topbar-row">
     <nav class="tabs">
       <button class="tab-btn active" data-tab="parts">パーツ一覧</button>
       <button class="tab-btn" data-tab="servers">サーバー一覧</button>
+      <button class="tab-btn" data-tab="settings">設定</button>
     </nav>
     <label class="inline-setting">カテゴリ表記
       <select id="category-display">
@@ -93,6 +120,69 @@
       </table>
     </div>
     <p id="servers-empty" class="empty-msg" hidden>サーバーが登録されていません。</p>
+  </section>
+
+  <!-- 設定 -->
+  <section id="tab-settings" class="tab-panel">
+    <div class="settings-section">
+      <h2>パスワード変更</h2>
+      <form id="form-password" class="settings-form">
+        <label>現在のパスワード
+          <input id="pw-current" type="password" autocomplete="current-password" required />
+        </label>
+        <label>新しいパスワード（8文字以上）
+          <input id="pw-new" type="password" autocomplete="new-password" required />
+        </label>
+        <p class="err-msg" id="pw-err" hidden></p>
+        <p class="info-line" id="pw-ok" hidden>パスワードを変更しました。</p>
+        <button type="submit" class="primary">変更する</button>
+      </form>
+    </div>
+
+    <div class="settings-section admin-only" hidden>
+      <h2>ユーザー管理</h2>
+      <form id="form-new-user" class="settings-form inline-form">
+        <label>ユーザー名
+          <input id="new-user-name" required />
+        </label>
+        <label>パスワード（8文字以上）
+          <input id="new-user-password" type="password" required />
+        </label>
+        <label>権限
+          <select id="new-user-role">
+            <option value="member">一般</option>
+            <option value="admin">管理者</option>
+          </select>
+        </label>
+        <button type="submit" class="primary">追加</button>
+      </form>
+      <p class="err-msg" id="user-err" hidden></p>
+      <div class="table-scroll">
+        <table class="data-table small">
+          <thead><tr><th>ユーザー名</th><th>権限</th><th>作成日</th><th>最終ログイン</th><th>操作</th></tr></thead>
+          <tbody id="users-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="settings-section admin-only" hidden>
+      <h2>APIトークン</h2>
+      <p class="info-line">Proxmoxホストから構成を送信する等、ブラウザ以外からAPIを使うためのトークンです。発行時に一度だけ表示されます。</p>
+      <form id="form-new-token" class="settings-form inline-form">
+        <label>用途がわかる名前
+          <input id="new-token-name" placeholder="例: prox04" required />
+        </label>
+        <button type="submit" class="primary">発行</button>
+      </form>
+      <p class="token-reveal" id="token-reveal" hidden></p>
+      <p class="err-msg" id="token-err" hidden></p>
+      <div class="table-scroll">
+        <table class="data-table small">
+          <thead><tr><th>名前</th><th>発行日</th><th>操作</th></tr></thead>
+          <tbody id="tokens-tbody"></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -411,6 +501,7 @@
   </div>
 </dialog>
 
+</div><!-- /app-shell -->
 <script src="app.js"></script>
 </body>
 </html>

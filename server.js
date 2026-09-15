@@ -4,6 +4,8 @@ const path = require('path');
 const partsRouter = require('./src/routes/parts');
 const serversRouter = require('./src/routes/servers');
 const assignmentsRouter = require('./src/routes/assignments');
+const authRouter = require('./src/routes/auth');
+const { requireAuth } = require('./src/auth');
 
 const app = express();
 
@@ -14,9 +16,11 @@ const PORT = process.env.SERVER_PORT || process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.use('/api/parts', partsRouter);
-app.use('/api/servers', serversRouter);
-app.use('/api/assignments', assignmentsRouter);
+app.use('/api/auth', authRouter);
+// データを扱うAPIはすべてログイン（またはAPIトークン）必須
+app.use('/api/parts', requireAuth, partsRouter);
+app.use('/api/servers', requireAuth, serversRouter);
+app.use('/api/assignments', requireAuth, assignmentsRouter);
 
 app.use((err, req, res, next) => {
   console.error(err);

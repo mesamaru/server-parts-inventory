@@ -9,7 +9,10 @@ function emptyDB() {
     parts: [],
     servers: [],
     assignments: [],
-    seq: { parts: 0, servers: 0, assignments: 0 },
+    users: [],
+    sessions: [],
+    api_tokens: [],
+    seq: { parts: 0, servers: 0, assignments: 0, users: 0, api_tokens: 0 },
   };
 }
 
@@ -24,7 +27,12 @@ function readDB() {
   ensureDB();
   const raw = fs.readFileSync(DB_FILE, 'utf-8');
   const db = JSON.parse(raw);
-  if (!db.seq) db.seq = { parts: 0, servers: 0, assignments: 0 };
+  // 旧バージョンのdb.jsonにも後から追加したテーブルが無いので補う
+  const base = emptyDB();
+  Object.keys(base).forEach((key) => {
+    if (key !== 'seq' && !db[key]) db[key] = base[key];
+  });
+  if (!db.seq) db.seq = base.seq;
   return db;
 }
 

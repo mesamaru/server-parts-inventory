@@ -163,6 +163,11 @@ async function api(path, options = {}) {
   if (text) {
     try { body = JSON.parse(text); } catch { body = null; }
   }
+  // ログイン失敗の401はそのままエラーを返す。それ以外の401はセッション切れとして扱う。
+  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+    showAuthScreen({ setup_required: false });
+    throw new Error('セッションが切れました。再度ログインしてください。');
+  }
   if (!res.ok) {
     const msg = (body && body.error) || `リクエストに失敗しました (${res.status})`;
     throw new Error(msg);
@@ -1393,6 +1398,189 @@ document.getElementById('form-move').addEventListener('submit', async (e) => {
   }
 });
 
+/* ================= 認証 ================= */
+let currentUser = null;
+let authMode = 'login'; // 'login' | 'setup'
+
+function showAuthScreen(state) {
+  authMode = state.setup_required ? 'setup' : 'login';
+  currentUser = null;
+  document.getElementById('app-shell').hidden = true;
+  document.getElementById('auth-screen').hidden = false;
+  document.getElementById('auth-err').hidden = true;
+  document.getElementById('auth-lead').textContent = authMode === 'setup'
+    ? '最初の管理者アカウントを作成してください。'
+    : 'ログインしてください。';
+  document.getElementById('btn-auth-submit').textContent = authMode === 'setup' ? '作成してはじめる' : 'ログイン';
+  document.getElementById('auth-password2-label').hidden = authMode !== 'setup';
+  document.getElementById('auth-password').autocomplete = authMode === 'setup' ? 'new-password' : 'current-password';
+  document.getElementById('form-auth').reset();
+}
+
+async function showApp(user) {
+  currentUser = user;
+  document.getElementById('auth-screen').hidden = true;
+  document.getElementById('app-shell').hidden = false;
+  document.getElementById('current-user').textContent = `${user.username}（${user.role === 'admin' ? '管理者' : '一般'}）`;
+  document.querySelectorAll('.admin-only').forEach((el) => { el.hidden = user.role !== 'admin'; });
+  await refreshAll();
+  if (user.role === 'admin') await Promise.all([loadUsers(), loadTokens()]);
+}
+
+document.getElementById('form-auth').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('auth-err');
+  errEl.hidden = true;
+  const username = document.getElementById('auth-username').value.trim();
+  const password = document.getElementById('auth-password').value;
+  if (authMode === 'setup' && password !== document.getElementById('auth-password2').value) {
+    errEl.textContent = 'パスワードが一致しません';
+    errEl.hidden = false;
+    return;
+  }
+  try {
+    const res = await api(`/api/auth/${authMode}`, {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    await showApp(res.user);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+document.getElementById('btn-logout').addEventListener('click', async () => {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  showAuthScreen({ setup_required: false });
+});
+
+/* ---- パスワード変更 ---- */
+document.getElementById('form-password').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('pw-err');
+  const okEl = document.getElementById('pw-ok');
+  errEl.hidden = true;
+  okEl.hidden = true;
+  try {
+    await api('/api/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_password: document.getElementById('pw-current').value,
+        new_password: document.getElementById('pw-new').value,
+      }),
+    });
+    document.getElementById('form-password').reset();
+    okEl.hidden = false;
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+/* ---- ユーザー管理 ---- */
+async function loadUsers() {
+  const users = await api('/api/auth/users');
+  document.getElementById('users-tbody').innerHTML = users.map((u) => `<tr>
+    <td>${escapeHtml(u.username)}</td>
+    <td>${u.role === 'admin' ? '管理者' : '一般'}</td>
+    <td>${fmtDate(u.created_at)}</td>
+    <td>${u.last_login_at ? fmtDate(u.last_login_at) : '-'}</td>
+    <td>${u.id === currentUser.id ? '<span class="unit-label">自分</span>' : iconBtn(ICON.trash, '削除', `data-delete-user="${u.id}" data-user-name="${escapeHtml(u.username)}"`, true)}</td>
+  </tr>`).join('');
+}
+
+document.getElementById('form-new-user').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('user-err');
+  errEl.hidden = true;
+  try {
+    await api('/api/auth/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: document.getElementById('new-user-name').value.trim(),
+        password: document.getElementById('new-user-password').value,
+        role: document.getElementById('new-user-role').value,
+      }),
+    });
+    document.getElementById('form-new-user').reset();
+    await loadUsers();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+document.getElementById('users-tbody').addEventListener('click', async (e) => {
+  const id = e.target.dataset.deleteUser;
+  if (!id) return;
+  const ok = await confirmDialog({
+    title: 'ユーザーの削除',
+    message: `ユーザー「${e.target.dataset.userName}」を削除します。よろしいですか？`,
+    okLabel: '削除する',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/auth/users/${id}`, { method: 'DELETE' });
+    await loadUsers();
+  } catch (err) {
+    const errEl = document.getElementById('user-err');
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+/* ---- APIトークン ---- */
+async function loadTokens() {
+  const tokens = await api('/api/auth/tokens');
+  document.getElementById('tokens-tbody').innerHTML = tokens.map((t) => `<tr>
+    <td>${escapeHtml(t.name)}</td>
+    <td>${fmtDate(t.created_at)}</td>
+    <td>${iconBtn(ICON.trash, '失効させる', `data-delete-token="${t.id}" data-token-name="${escapeHtml(t.name)}"`, true)}</td>
+  </tr>`).join('');
+}
+
+document.getElementById('form-new-token').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('token-err');
+  errEl.hidden = true;
+  try {
+    const res = await api('/api/auth/tokens', {
+      method: 'POST',
+      body: JSON.stringify({ name: document.getElementById('new-token-name').value.trim() }),
+    });
+    const reveal = document.getElementById('token-reveal');
+    reveal.textContent = `${res.name}: ${res.token} — この画面を離れると二度と表示されません。控えてください。`;
+    reveal.hidden = false;
+    document.getElementById('form-new-token').reset();
+    await loadTokens();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+document.getElementById('tokens-tbody').addEventListener('click', async (e) => {
+  const id = e.target.dataset.deleteToken;
+  if (!id) return;
+  const ok = await confirmDialog({
+    title: 'APIトークンの失効',
+    message: `トークン「${e.target.dataset.tokenName}」を失効させます。\nこのトークンを使っている処理は動かなくなります。よろしいですか？`,
+    okLabel: '失効させる',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/auth/tokens/${id}`, { method: 'DELETE' });
+    await loadTokens();
+  } catch (err) {
+    const errEl = document.getElementById('token-err');
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
 /* ================= 初期化 ================= */
 
 // 背景（グレーアウト部分）のクリックでダイアログを閉じる。
@@ -1407,4 +1595,12 @@ async function refreshAll() {
   await Promise.all([loadParts(), loadServers(), loadCategories()]);
 }
 
-refreshAll().catch((err) => alert(`データの読み込みに失敗しました: ${err.message}`));
+(async () => {
+  try {
+    const state = await api('/api/auth/state');
+    if (state.user) await showApp(state.user);
+    else showAuthScreen(state);
+  } catch (err) {
+    alert(`起動に失敗しました: ${err.message}`);
+  }
+})();
