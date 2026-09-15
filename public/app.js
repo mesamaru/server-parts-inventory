@@ -188,11 +188,19 @@ function todayInputValue() {
 
 /* ---------- tabs ---------- */
 document.querySelectorAll('.tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
     document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+    // 履歴・ゴミ箱は開いたときに最新を取りに行く
+    if (btn.dataset.tab === 'history') {
+      try {
+        await reloadHistoryTab();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
   });
 });
 
@@ -1578,6 +1586,115 @@ document.getElementById('tokens-tbody').addEventListener('click', async (e) => {
     const errEl = document.getElementById('token-err');
     errEl.textContent = err.message;
     errEl.hidden = false;
+  }
+});
+
+/* ================= 履歴・ゴミ箱 ================= */
+
+const ACTION_LABEL = {
+  'part.create': 'パーツ登録',
+  'part.update': 'パーツ編集',
+  'part.delete': 'パーツ削除',
+  'part.restore': 'パーツ復元',
+  'part.purge': 'パーツ完全削除',
+  'part.bulk_import': 'CSV一括登録',
+  'part.bulk_edit': 'パーツ一括編集',
+  'part.bulk_delete': 'パーツ一括削除',
+  'server.create': 'サーバー登録',
+  'server.update': 'サーバー編集',
+  'server.delete': 'サーバー削除',
+  'server.restore': 'サーバー復元',
+  'server.purge': 'サーバー完全削除',
+  'assignment.assign': '割り当て',
+  'assignment.bulk_assign': '一括割り当て',
+  'assignment.remove': '取り外し',
+  'assignment.bulk_remove': '一括取り外し',
+  'assignment.move': 'サーバー間移動',
+};
+
+function fmtDateTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadTrash() {
+  const trash = await api('/api/trash');
+  const partsBody = document.getElementById('trash-parts-tbody');
+  partsBody.innerHTML = trash.parts.map((p) => `<tr>
+    <td class="cell-category">${escapeHtml(categoryLabel(p.category))}</td>
+    <td>${p.maker ? `<span class="maker-tag">${escapeHtml(p.maker)}</span>` : ''}${escapeHtml(p.name)}</td>
+    <td>${escapeHtml(p.spec) || '-'}</td>
+    <td>${escapeHtml(p.serial_number) || '-'}</td>
+    <td>${fmtDateTime(p.deleted_at)}</td>
+    <td><div class="row-actions">
+      <button type="button" class="link" data-restore="parts" data-restore-id="${p.id}" data-restore-name="${escapeHtml(p.name)}">復元</button>
+      ${currentUser.role === 'admin' ? `<button type="button" class="link danger-link" data-purge="parts" data-purge-id="${p.id}" data-purge-name="${escapeHtml(p.name)}">完全削除</button>` : ''}
+    </div></td>
+  </tr>`).join('');
+  document.getElementById('trash-parts-empty').hidden = trash.parts.length > 0;
+
+  const serversBody = document.getElementById('trash-servers-tbody');
+  serversBody.innerHTML = trash.servers.map((s) => `<tr>
+    <td>${escapeHtml(s.name)}</td>
+    <td>${escapeHtml(s.location) || '-'}</td>
+    <td>${fmtDateTime(s.deleted_at)}</td>
+    <td><div class="row-actions">
+      <button type="button" class="link" data-restore="servers" data-restore-id="${s.id}" data-restore-name="${escapeHtml(s.name)}">復元</button>
+      ${currentUser.role === 'admin' ? `<button type="button" class="link danger-link" data-purge="servers" data-purge-id="${s.id}" data-purge-name="${escapeHtml(s.name)}">完全削除</button>` : ''}
+    </div></td>
+  </tr>`).join('');
+  document.getElementById('trash-servers-empty').hidden = trash.servers.length > 0;
+}
+
+async function loadAudit() {
+  const logs = await api('/api/audit?limit=100');
+  document.getElementById('audit-tbody').innerHTML = logs.map((l) => `<tr>
+    <td>${fmtDateTime(l.at)}</td>
+    <td>${escapeHtml(l.user)}</td>
+    <td>${escapeHtml(ACTION_LABEL[l.action] || l.action)}</td>
+    <td>${escapeHtml(l.target_name) || '-'}</td>
+    <td>${escapeHtml(l.detail) || '-'}</td>
+  </tr>`).join('');
+  document.getElementById('audit-empty').hidden = logs.length > 0;
+}
+
+async function reloadHistoryTab() {
+  await Promise.all([loadTrash(), loadAudit()]);
+}
+
+document.getElementById('tab-history').addEventListener('click', async (e) => {
+  const t = e.target;
+  const errEl = document.getElementById('trash-err');
+  errEl.hidden = true;
+
+  if (t.dataset.restore) {
+    try {
+      await api(`/api/trash/${t.dataset.restore}/${t.dataset.restoreId}/restore`, { method: 'POST' });
+      await Promise.all([reloadHistoryTab(), refreshAll()]);
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+    return;
+  }
+
+  if (t.dataset.purge) {
+    const ok = await confirmDialog({
+      title: '完全削除',
+      message: `「${t.dataset.purgeName}」を完全に削除します。\nこの操作は取り消せません。よろしいですか？`,
+      okLabel: '完全に削除する',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api(`/api/trash/${t.dataset.purge}/${t.dataset.purgeId}`, { method: 'DELETE' });
+      await reloadHistoryTab();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
   }
 });
 

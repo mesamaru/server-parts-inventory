@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { readDB, writeDB, nextId } = require('../db');
+const { logAction, activeServers, findActiveServer } = require('../audit');
 
 function decorate(db, server) {
   const active = db.assignments.filter((a) => a.server_id === server.id && a.removed_at === null);
@@ -9,7 +10,7 @@ function decorate(db, server) {
 
 router.get('/', (req, res) => {
   const db = readDB();
-  let servers = db.servers.map((s) => decorate(db, s));
+  let servers = activeServers(db).map((s) => decorate(db, s));
   const { q } = req.query;
   if (q) {
     const qq = String(q).toLowerCase();
@@ -23,7 +24,7 @@ router.get('/', (req, res) => {
 
 router.get('/:id', (req, res) => {
   const db = readDB();
-  const server = db.servers.find((s) => s.id === Number(req.params.id));
+  const server = findActiveServer(db, req.params.id);
   if (!server) return res.status(404).json({ error: 'サーバーが見つかりません' });
 
   const currentConfig = db.assignments
@@ -75,15 +76,17 @@ router.post('/', (req, res) => {
     notes: notes ? String(notes).trim() : '',
     created_at: now,
     updated_at: now,
+    deleted_at: null,
   };
   db.servers.push(server);
+  logAction(db, req, { action: 'server.create', target_type: 'server', target_id: server.id, target_name: server.name });
   writeDB(db);
   res.status(201).json(decorate(db, server));
 });
 
 router.put('/:id', (req, res) => {
   const db = readDB();
-  const server = db.servers.find((s) => s.id === Number(req.params.id));
+  const server = findActiveServer(db, req.params.id);
   if (!server) return res.status(404).json({ error: 'サーバーが見つかりません' });
   const { name, location, status, notes } = req.body || {};
   if (name !== undefined) server.name = String(name).trim();
@@ -91,19 +94,22 @@ router.put('/:id', (req, res) => {
   if (status !== undefined) server.status = String(status).trim();
   if (notes !== undefined) server.notes = String(notes).trim();
   server.updated_at = new Date().toISOString();
+  logAction(db, req, { action: 'server.update', target_type: 'server', target_id: server.id, target_name: server.name });
   writeDB(db);
   res.json(decorate(db, server));
 });
 
+// 物理削除ではなくゴミ箱へ移動する
 router.delete('/:id', (req, res) => {
   const db = readDB();
-  const idx = db.servers.findIndex((s) => s.id === Number(req.params.id));
-  if (idx === -1) return res.status(404).json({ error: 'サーバーが見つかりません' });
-  const hasActive = db.assignments.some((a) => a.server_id === db.servers[idx].id && a.removed_at === null);
+  const server = findActiveServer(db, req.params.id);
+  if (!server) return res.status(404).json({ error: 'サーバーが見つかりません' });
+  const hasActive = db.assignments.some((a) => a.server_id === server.id && a.removed_at === null);
   if (hasActive) {
     return res.status(400).json({ error: 'このサーバーにはパーツが割り当てられています。先にすべて取り外してください。' });
   }
-  db.servers.splice(idx, 1);
+  server.deleted_at = new Date().toISOString();
+  logAction(db, req, { action: 'server.delete', target_type: 'server', target_id: server.id, target_name: server.name });
   writeDB(db);
   res.status(204).end();
 });

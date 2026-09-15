@@ -7,6 +7,7 @@
 ## 機能
 
 - ログイン認証（アカウント管理・APIトークン）
+- ゴミ箱（削除したパーツ・サーバーの復元）と操作履歴（監査ログ）
 - パーツ一覧の登録・編集・削除（カテゴリ／型番／スペック／シリアル番号／購入日／ステータス）
 - CSVを貼り付け／アップロードしての一括登録（AI等でまとめたリストを一括で取り込み）
 - パーツのステータス管理（正常／故障／廃棄）
@@ -116,6 +117,10 @@ CPU,Intel Xeon E5-2680 v4,14core/28thread 2.4GHz,ABC123,正常,2024-05-01,
 | POST | /api/auth/password | 自分のパスワード変更 |
 | GET/POST/DELETE | /api/auth/users | ユーザー管理（管理者のみ） |
 | GET/POST/DELETE | /api/auth/tokens | APIトークン管理（管理者のみ） |
+| GET | /api/trash | ゴミ箱の一覧（削除済みパーツ・サーバー） |
+| POST | /api/trash/:type/:id/restore | 復元（type は parts / servers） |
+| DELETE | /api/trash/:type/:id | 完全削除（管理者のみ・取り消し不可） |
+| GET | /api/audit | 操作履歴（`?limit=` で件数指定、既定100・最大500） |
 | GET | /api/parts | パーツ一覧（検索・フィルタ可） |
 | POST | /api/parts | パーツ新規登録 |
 | POST | /api/parts/bulk | CSV等からの一括登録（`{ parts: [...] }`、行単位で成功/失敗を返す） |

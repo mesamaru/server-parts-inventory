@@ -5,6 +5,8 @@ const partsRouter = require('./src/routes/parts');
 const serversRouter = require('./src/routes/servers');
 const assignmentsRouter = require('./src/routes/assignments');
 const authRouter = require('./src/routes/auth');
+const trashRouter = require('./src/routes/trash');
+const auditRouter = require('./src/routes/audit');
 const { requireAuth } = require('./src/auth');
 
 const app = express();
@@ -21,6 +23,8 @@ app.use('/api/auth', authRouter);
 app.use('/api/parts', requireAuth, partsRouter);
 app.use('/api/servers', requireAuth, serversRouter);
 app.use('/api/assignments', requireAuth, assignmentsRouter);
+app.use('/api/trash', requireAuth, trashRouter);
+app.use('/api/audit', requireAuth, auditRouter);
 
 app.use((err, req, res, next) => {
   console.error(err);

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { readDB, writeDB, nextId } = require('../db');
+const { logAction, activeParts, findActivePart } = require('../audit');
 
 const STATUS_ALIASES = {
   '正常': 'normal', normal: 'normal',
@@ -41,7 +42,7 @@ function decorate(db, part) {
 
 router.get('/', (req, res) => {
   const db = readDB();
-  let parts = db.parts.map((p) => decorate(db, p));
+  let parts = activeParts(db).map((p) => decorate(db, p));
   const { category, status, assignment_state, q } = req.query;
   const categories = queryValues(category);
   const statuses = queryValues(status);
@@ -64,13 +65,13 @@ router.get('/', (req, res) => {
 // フィルタ用。絞り込み結果ではなく全パーツからカテゴリ一覧を作る
 router.get('/categories', (req, res) => {
   const db = readDB();
-  const categories = [...new Set(db.parts.map((p) => p.category))].sort((a, b) => a.localeCompare(b, 'ja'));
+  const categories = [...new Set(activeParts(db).map((p) => p.category))].sort((a, b) => a.localeCompare(b, 'ja'));
   res.json(categories);
 });
 
 router.get('/:id', (req, res) => {
   const db = readDB();
-  const part = db.parts.find((p) => p.id === Number(req.params.id));
+  const part = findActivePart(db, req.params.id);
   if (!part) return res.status(404).json({ error: 'パーツが見つかりません' });
   const history = db.assignments
     .filter((a) => a.part_id === part.id)
@@ -102,8 +103,10 @@ router.post('/', (req, res) => {
     notes: notes ? String(notes).trim() : '',
     created_at: now,
     updated_at: now,
+    deleted_at: null,
   };
   db.parts.push(part);
+  logAction(db, req, { action: 'part.create', target_type: 'part', target_id: part.id, target_name: part.name });
   writeDB(db);
   res.status(201).json(decorate(db, part));
 });
@@ -142,18 +145,23 @@ router.post('/bulk', (req, res) => {
     };
 
     if (raw.update_id) {
-      const target = db.parts.find((p) => p.id === Number(raw.update_id));
+      const target = findActivePart(db, raw.update_id);
       if (!target) return errors.push({ row: rowNo, error: '上書き対象のパーツが見つかりません' });
       Object.assign(target, values, { updated_at: now });
       updated.push(target);
       return;
     }
 
-    toCreate.push({ id: nextId(db, 'parts'), ...values, created_at: now, updated_at: now });
+    toCreate.push({ id: nextId(db, 'parts'), ...values, created_at: now, updated_at: now, deleted_at: null });
   });
 
   if (toCreate.length || updated.length) {
     db.parts.push(...toCreate);
+    logAction(db, req, {
+      action: 'part.bulk_import',
+      target_type: 'part',
+      detail: `新規${toCreate.length}件 / 上書き${updated.length}件`,
+    });
     writeDB(db);
   }
 
@@ -182,14 +190,19 @@ router.post('/bulk-edit', (req, res) => {
   const errors = [];
   ids.forEach((rawId) => {
     const id = Number(rawId);
-    const part = db.parts.find((p) => p.id === id);
+    const part = findActivePart(db, id);
     if (!part) { errors.push({ id, error: 'パーツが見つかりません' }); return; }
     if (trimmedCategory) part.category = trimmedCategory;
     if (resolvedStatus) part.status = resolvedStatus;
     part.updated_at = now;
     updated.push(id);
   });
-  if (updated.length) writeDB(db);
+  if (updated.length) {
+    const changes = [trimmedCategory && `カテゴリ→${trimmedCategory}`, resolvedStatus && `ステータス→${resolvedStatus}`]
+      .filter(Boolean).join(' / ');
+    logAction(db, req, { action: 'part.bulk_edit', target_type: 'part', detail: `${updated.length}件: ${changes}` });
+    writeDB(db);
+  }
   res.json({ updated: updated.map((id) => decorate(db, db.parts.find((p) => p.id === id))), errors });
 });
 
@@ -202,24 +215,28 @@ router.post('/bulk-delete', (req, res) => {
   }
   const deleted = [];
   const errors = [];
+  const now = new Date().toISOString();
   ids.forEach((rawId) => {
     const id = Number(rawId);
-    const idx = db.parts.findIndex((p) => p.id === id);
-    if (idx === -1) { errors.push({ id, error: 'パーツが見つかりません' }); return; }
+    const part = findActivePart(db, id);
+    if (!part) { errors.push({ id, error: 'パーツが見つかりません' }); return; }
     if (findActiveAssignment(db, id)) {
       errors.push({ id, error: '割り当て中のため削除できません' });
       return;
     }
-    db.parts.splice(idx, 1);
+    part.deleted_at = now;
     deleted.push(id);
   });
-  if (deleted.length) writeDB(db);
+  if (deleted.length) {
+    logAction(db, req, { action: 'part.bulk_delete', target_type: 'part', detail: `${deleted.length}件をゴミ箱へ移動` });
+    writeDB(db);
+  }
   res.json({ deleted, errors });
 });
 
 router.put('/:id', (req, res) => {
   const db = readDB();
-  const part = db.parts.find((p) => p.id === Number(req.params.id));
+  const part = findActivePart(db, req.params.id);
   if (!part) return res.status(404).json({ error: 'パーツが見つかりません' });
   const { category, name, maker, spec, serial_number, status, purchase_date, notes } = req.body || {};
   let resolvedStatus;
@@ -236,19 +253,21 @@ router.put('/:id', (req, res) => {
   if (purchase_date !== undefined) part.purchase_date = purchase_date || null;
   if (notes !== undefined) part.notes = String(notes).trim();
   part.updated_at = new Date().toISOString();
+  logAction(db, req, { action: 'part.update', target_type: 'part', target_id: part.id, target_name: part.name });
   writeDB(db);
   res.json(decorate(db, part));
 });
 
+// 物理削除ではなくゴミ箱へ移動する（ゴミ箱から復元・完全削除できる）
 router.delete('/:id', (req, res) => {
   const db = readDB();
-  const idx = db.parts.findIndex((p) => p.id === Number(req.params.id));
-  if (idx === -1) return res.status(404).json({ error: 'パーツが見つかりません' });
-  const hasActive = findActiveAssignment(db, db.parts[idx].id);
-  if (hasActive) {
+  const part = findActivePart(db, req.params.id);
+  if (!part) return res.status(404).json({ error: 'パーツが見つかりません' });
+  if (findActiveAssignment(db, part.id)) {
     return res.status(400).json({ error: 'このパーツは現在サーバーに割り当て中です。先に取り外してください。' });
   }
-  db.parts.splice(idx, 1);
+  part.deleted_at = new Date().toISOString();
+  logAction(db, req, { action: 'part.delete', target_type: 'part', target_id: part.id, target_name: part.name });
   writeDB(db);
   res.status(204).end();
 });

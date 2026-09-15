@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { readDB, writeDB, nextId } = require('../db');
+const { logAction, findActivePart, findActiveServer } = require('../audit');
 
 function findActiveAssignment(db, partId) {
   return db.assignments.find((a) => a.part_id === partId && a.removed_at === null);
@@ -10,8 +11,8 @@ function findActiveAssignment(db, partId) {
 router.post('/', (req, res) => {
   const db = readDB();
   const { part_id, server_id, installed_at, notes } = req.body || {};
-  const part = db.parts.find((p) => p.id === Number(part_id));
-  const server = db.servers.find((s) => s.id === Number(server_id));
+  const part = findActivePart(db, part_id);
+  const server = findActiveServer(db, server_id);
   if (!part) return res.status(400).json({ error: 'パーツが見つかりません' });
   if (!server) return res.status(400).json({ error: 'サーバーが見つかりません' });
   if (part.status !== 'normal') {
@@ -33,6 +34,13 @@ router.post('/', (req, res) => {
     notes: notes ? String(notes).trim() : '',
   };
   db.assignments.push(assignment);
+  logAction(db, req, {
+    action: 'assignment.assign',
+    target_type: 'part',
+    target_id: part.id,
+    target_name: part.name,
+    detail: `${server.name} に割り当て`,
+  });
   writeDB(db);
   res.status(201).json(assignment);
 });
@@ -44,7 +52,7 @@ router.post('/bulk', (req, res) => {
   if (!Array.isArray(part_ids) || !part_ids.length) {
     return res.status(400).json({ error: '対象パーツがありません' });
   }
-  const server = db.servers.find((s) => s.id === Number(server_id));
+  const server = findActiveServer(db, server_id);
   if (!server) return res.status(400).json({ error: 'サーバーが見つかりません' });
 
   const now = new Date().toISOString();
@@ -52,7 +60,7 @@ router.post('/bulk', (req, res) => {
   const errors = [];
   part_ids.forEach((rawId) => {
     const id = Number(rawId);
-    const part = db.parts.find((p) => p.id === id);
+    const part = findActivePart(db, id);
     if (!part) { errors.push({ part_id: id, error: 'パーツが見つかりません' }); return; }
     if (part.status !== 'normal') {
       errors.push({ part_id: id, error: `ステータスが「${part.status}」のため割り当てできません` });
@@ -77,7 +85,16 @@ router.post('/bulk', (req, res) => {
     created.push(assignment);
   });
 
-  if (created.length) writeDB(db);
+  if (created.length) {
+    logAction(db, req, {
+      action: 'assignment.bulk_assign',
+      target_type: 'server',
+      target_id: server.id,
+      target_name: server.name,
+      detail: `${created.length}件を割り当て`,
+    });
+    writeDB(db);
+  }
   res.json({ created, errors });
 });
 
@@ -99,7 +116,10 @@ router.post('/bulk-remove', (req, res) => {
     a.removed_at = now;
     removed.push(id);
   });
-  if (removed.length) writeDB(db);
+  if (removed.length) {
+    logAction(db, req, { action: 'assignment.bulk_remove', target_type: 'part', detail: `${removed.length}件を取り外し` });
+    writeDB(db);
+  }
   res.json({ removed, errors });
 });
 
@@ -112,6 +132,13 @@ router.post('/:id/remove', (req, res) => {
   const { removed_at, notes } = req.body || {};
   assignment.removed_at = removed_at || new Date().toISOString();
   if (notes !== undefined) assignment.notes = String(notes).trim();
+  logAction(db, req, {
+    action: 'assignment.remove',
+    target_type: 'part',
+    target_id: assignment.part_id,
+    target_name: assignment.part_name_snapshot,
+    detail: `${assignment.server_name_snapshot} から取り外し`,
+  });
   writeDB(db);
   res.json(assignment);
 });
@@ -123,7 +150,7 @@ router.post('/:id/move', (req, res) => {
   if (!current) return res.status(404).json({ error: '割り当てが見つかりません' });
   if (current.removed_at !== null) return res.status(400).json({ error: '既に取り外し済みの割り当てです' });
   const { server_id, notes } = req.body || {};
-  const newServer = db.servers.find((s) => s.id === Number(server_id));
+  const newServer = findActiveServer(db, server_id);
   if (!newServer) return res.status(400).json({ error: '移動先サーバーが見つかりません' });
   if (newServer.id === current.server_id) return res.status(400).json({ error: '移動先が現在と同じサーバーです' });
 
@@ -143,6 +170,13 @@ router.post('/:id/move', (req, res) => {
     notes: notes ? String(notes).trim() : '',
   };
   db.assignments.push(newAssignment);
+  logAction(db, req, {
+    action: 'assignment.move',
+    target_type: 'part',
+    target_id: current.part_id,
+    target_name: newAssignment.part_name_snapshot,
+    detail: `${current.server_name_snapshot} → ${newServer.name}`,
+  });
   writeDB(db);
   res.status(201).json({ closed: current, created: newAssignment });
 });
