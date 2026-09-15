@@ -200,14 +200,32 @@
       <p class="info-line">
         対象マシンで検出スクリプトを実行すると、実機の構成がここに届きます。内容を確認して反映するまで台帳は変更されません。
       </p>
-      <p class="info-line">
-        Proxmox / Linux:<br />
-        <code>sudo python3 hw_to_csv.py --push --url &lt;DmidexのURL&gt; --token &lt;APIトークン&gt; --server &lt;サーバー名&gt;</code>
-      </p>
-      <p class="info-line">
-        Windows（管理者として実行）:<br />
-        <code>powershell -ExecutionPolicy Bypass -File .\hw_to_csv.ps1 -Push -Url &lt;DmidexのURL&gt; -Token &lt;APIトークン&gt; -Server &lt;サーバー名&gt;</code>
-      </p>
+
+      <div class="cmd-builder">
+        <div class="cmd-fields">
+          <label>OS
+            <select id="cmd-os">
+              <option value="linux">Proxmox / Linux</option>
+              <option value="windows">Windows</option>
+            </select>
+          </label>
+          <label>対象サーバー
+            <select id="cmd-server"></select>
+          </label>
+          <label>DmidexのURL
+            <input id="cmd-url" />
+          </label>
+          <label>APIトークン
+            <select id="cmd-token"></select>
+          </label>
+        </div>
+        <p class="info-line" id="cmd-token-note"></p>
+        <div class="cmd-output">
+          <pre id="cmd-text"></pre>
+          <button type="button" class="secondary" id="btn-cmd-copy">コピー</button>
+        </div>
+      </div>
+
       <p class="err-msg" id="sync-err" hidden></p>
     </div>
     <div id="sync-reports"></div>

@@ -198,7 +198,10 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     try {
       if (btn.dataset.tab === 'dashboard') await loadDashboard();
       if (btn.dataset.tab === 'history') await reloadHistoryTab();
-      if (btn.dataset.tab === 'sync') await loadSyncReports();
+      if (btn.dataset.tab === 'sync') {
+        await loadSyncReports();
+        await loadCommandBuilder();
+      }
     } catch (err) {
       alert(err.message);
     }
@@ -1883,6 +1886,126 @@ document.getElementById('dash-servers-tbody').addEventListener('click', (e) => {
 /* ================= 構成同期 ================= */
 let syncReports = [];
 
+/* ---- 実行コマンドの生成 ---- */
+// スクリプトの取得元。リポジトリ名を変えたらここも変える。
+const SCRIPT_BASE_URL = 'https://raw.githubusercontent.com/mesamaru/server-parts-inventory/main/scripts';
+const TOKEN_PLACEHOLDER = '<APIトークン>';
+// 発行直後のトークンだけは値が分かるので、この画面を開いている間は覚えておく
+const issuedTokens = new Map();
+
+async function loadCommandBuilder() {
+  const serverSelect = document.getElementById('cmd-server');
+  const keepServer = serverSelect.value;
+  serverSelect.innerHTML = serversCache.length
+    ? serversCache.map((s) => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join('')
+    : '<option value="">(サーバー未登録)</option>';
+  if (keepServer) serverSelect.value = keepServer;
+
+  const urlInput = document.getElementById('cmd-url');
+  if (!urlInput.value) urlInput.value = location.origin;
+
+  // トークンの発行も一覧取得も管理者専用なので、一般ユーザーには選択肢を出さない
+  const tokenSelect = document.getElementById('cmd-token');
+  const keepToken = tokenSelect.value;
+  if (currentUser && currentUser.role === 'admin') {
+    let options = '<option value="__new__">＋ 新しいトークンを発行する</option>';
+    try {
+      const tokens = await api('/api/auth/tokens');
+      options += tokens.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+    } catch { /* 取得できなくても新規発行はできる */ }
+    tokenSelect.innerHTML = options;
+    tokenSelect.disabled = false;
+    if (keepToken) tokenSelect.value = keepToken;
+  } else {
+    tokenSelect.innerHTML = '<option value="">(管理者に発行してもらってください)</option>';
+    tokenSelect.disabled = true;
+  }
+  renderCommand();
+}
+
+function renderCommand() {
+  const os = document.getElementById('cmd-os').value;
+  const server = document.getElementById('cmd-server').value || '<サーバー名>';
+  const url = (document.getElementById('cmd-url').value || location.origin).replace(/\/+$/, '');
+  const tokenId = document.getElementById('cmd-token').value;
+  const token = issuedTokens.get(tokenId) || TOKEN_PLACEHOLDER;
+
+  const note = document.getElementById('cmd-token-note');
+  if (tokenId === '__new__') {
+    note.textContent = 'この選択のままコピーすると、トークンを新規発行して値を埋め込みます。';
+  } else if (!tokenId) {
+    note.textContent = 'APIトークンの発行は管理者のみ行えます。発行済みの値を管理者から受け取って置き換えてください。';
+  } else if (token === TOKEN_PLACEHOLDER) {
+    note.textContent = 'トークンの値は発行時にしか表示されないため、ここでは埋め込めません。控えがなければ新規発行してください。';
+  } else {
+    note.textContent = '発行したトークンを埋め込んでいます。この画面を離れると再表示できません。';
+  }
+
+  document.getElementById('cmd-text').textContent = os === 'windows'
+    ? `curl.exe -O ${SCRIPT_BASE_URL}/hw_to_csv.ps1\n`
+      + `powershell -ExecutionPolicy Bypass -File .\\hw_to_csv.ps1 -Push -Url ${url} -Token ${token} -Server ${server}`
+    : `curl -O ${SCRIPT_BASE_URL}/hw_to_csv.py\n`
+      + `sudo python3 hw_to_csv.py --push --url ${url} --token ${token} --server ${server}`;
+}
+
+['cmd-os', 'cmd-server', 'cmd-url', 'cmd-token'].forEach((id) => {
+  document.getElementById(id).addEventListener('input', renderCommand);
+  document.getElementById(id).addEventListener('change', renderCommand);
+});
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // HTTPS以外ではclipboard APIが使えないので選択方式にフォールバックする
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
+  }
+}
+
+document.getElementById('btn-cmd-copy').addEventListener('click', async () => {
+  const errEl = document.getElementById('sync-err');
+  errEl.hidden = true;
+  const tokenSelect = document.getElementById('cmd-token');
+
+  // 「新規発行」が選ばれていれば、コピーの直前にトークンを作って埋め込む
+  if (tokenSelect.value === '__new__') {
+    const server = document.getElementById('cmd-server').value || 'script';
+    try {
+      const res = await api('/api/auth/tokens', {
+        method: 'POST',
+        body: JSON.stringify({ name: `${server} (構成同期)` }),
+      });
+      issuedTokens.set(String(res.id), res.token);
+      // 一覧の再取得を待たずに選択肢を足す（再取得に失敗しても確実に選べるように）
+      const option = document.createElement('option');
+      option.value = String(res.id);
+      option.textContent = res.name;
+      tokenSelect.appendChild(option);
+      tokenSelect.value = String(res.id);
+      renderCommand();
+      await loadTokens();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+      return;
+    }
+  }
+
+  const btn = document.getElementById('btn-cmd-copy');
+  const ok = await copyText(document.getElementById('cmd-text').textContent);
+  btn.textContent = ok ? 'コピーしました' : 'コピーできません';
+  setTimeout(() => { btn.textContent = 'コピー'; }, 2000);
+});
+
 function partLabel(p) {
   const bits = [p.spec, p.serial_number && `S/N: ${p.serial_number}`, p.notes].filter(Boolean);
   return `<strong>${escapeHtml(categoryLabel(p.category))}</strong> ${p.maker ? `<span class="maker-tag">${escapeHtml(p.maker)}</span>` : ''}${escapeHtml(p.name)}`
@@ -2143,6 +2266,8 @@ document.querySelectorAll('dialog').forEach((dlg) => {
 
 async function refreshAll() {
   await Promise.all([loadParts(), loadServers(), loadCategories(), loadSyncReports(), loadDashboard()]);
+  // サーバー一覧を読み終えてからでないと対象サーバーの選択肢を作れない
+  await loadCommandBuilder();
 }
 
 (async () => {
