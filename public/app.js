@@ -1,4 +1,21 @@
 /* eslint-disable no-alert */
+
+/* ---------- テーマ（ライト/ダーク/端末に合わせる） ---------- */
+// 初回のCSS適用は index.html の head 内インラインスクリプトで行う（ちらつき防止のため）。
+// ここでは設定画面の初期値表示と、変更時の切り替えを担当する。
+let themePref = 'system';
+try {
+  themePref = localStorage.getItem('themePref') || 'system';
+} catch { /* プライベートモード等でlocalStorageが使えない場合は既定値のまま */ }
+
+function applyTheme(pref) {
+  if (pref === 'light' || pref === 'dark') {
+    document.documentElement.setAttribute('data-theme', pref);
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+}
+
 let partsCache = [];
 let serversCache = [];
 let allCategories = [];
@@ -22,6 +39,7 @@ const ICON = {
   alert: svgIcon('<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'),
   archive: svgIcon('<polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>'),
   package: svgIcon('<line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>'),
+  terminal: svgIcon('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
 };
 
 const STATUS_ICON = {
@@ -464,6 +482,31 @@ categoryDisplaySelect.addEventListener('change', async (e) => {
   } catch { /* 保存できなくても表示自体は切り替える */ }
   renderPartsTable();
   if (dlgServerDetail.open && currentDetailServerId) await refreshServerDetail();
+});
+
+const themeSelect = document.getElementById('theme-select');
+themeSelect.value = themePref;
+themeSelect.addEventListener('change', (e) => {
+  themePref = e.target.value;
+  applyTheme(themePref);
+  try {
+    localStorage.setItem('themePref', themePref);
+  } catch { /* 保存できなくても表示自体は切り替える */ }
+});
+
+/* ---- モバイル幅でのハンバーガーメニュー ---- */
+const mainTabs = document.getElementById('main-tabs');
+const navToggle = document.getElementById('btn-nav-toggle');
+navToggle.addEventListener('click', () => {
+  const open = mainTabs.classList.toggle('open');
+  navToggle.setAttribute('aria-expanded', String(open));
+});
+// タブを選んだらメニューは自動で閉じる（スマホ幅で開いたままにしない）
+mainTabs.addEventListener('click', (e) => {
+  if (e.target.closest('.tab-btn')) {
+    mainTabs.classList.remove('open');
+    navToggle.setAttribute('aria-expanded', 'false');
+  }
 });
 
 document.getElementById('parts-search').addEventListener('input', debounce(loadParts, 250));
@@ -1372,6 +1415,9 @@ function renderServersTable() {
     <td data-label="搭載パーツ数">${s.current_parts_count}</td>
     <td data-label="操作"><div class="row-actions">
       ${iconBtn(ICON.view, '構成を見る', `data-open-server="${s.id}"`)}
+      ${(currentUser && currentUser.role === 'admin' && s.ssh && s.ssh.configured)
+        ? iconBtn(ICON.terminal, 'SSHで構成を取得', `data-ssh-fetch="${s.id}" data-ssh-fetch-name="${escapeHtml(s.name)}"`)
+        : ''}
       ${iconBtn(ICON.edit, '編集', `data-edit-server="${s.id}"`)}
       ${iconBtn(ICON.trash, '削除', `data-delete-server="${s.id}"`, true)}
     </div></td>
@@ -1385,7 +1431,28 @@ document.getElementById('servers-tbody').addEventListener('click', (e) => {
   if (t.dataset.openServer) return openServerDetail(Number(t.dataset.openServer));
   if (t.dataset.editServer) return openServerDialog(Number(t.dataset.editServer));
   if (t.dataset.deleteServer) return deleteServer(Number(t.dataset.deleteServer));
+  if (t.dataset.sshFetch) return runSshFetch(Number(t.dataset.sshFetch), t.dataset.sshFetchName, t);
 });
+
+// SSHで構成を取得し、成功したら構成同期タブに差分を表示する
+async function runSshFetch(serverId, serverName, triggerBtn) {
+  if (triggerBtn) triggerBtn.disabled = true;
+  try {
+    const res = await api(`/api/servers/${serverId}/ssh-fetch`, { method: 'POST' });
+    const s = res.summary;
+    await Promise.all([loadSyncReports(), loadDashboard()]);
+    const goToSync = confirm(
+      `「${serverName}」の構成を取得しました。\n`
+      + `一致: ${s.matched}件 / 在庫から割り当て候補: ${s.to_assign}件 / 未登録: ${s.unregistered}件 / 取り外し候補: ${s.to_remove}件\n\n`
+      + `構成同期タブを開いて内容を確認しますか？`
+    );
+    if (goToSync) document.querySelector('.tab-btn[data-tab="sync"]').click();
+  } catch (err) {
+    alert(`SSH取得に失敗しました: ${err.message}`);
+  } finally {
+    if (triggerBtn) triggerBtn.disabled = false;
+  }
+}
 
 async function deleteServer(id) {
   const server = serversCache.find((s) => s.id === id);
@@ -1423,8 +1490,139 @@ function openServerDialog(id) {
   } else {
     document.getElementById('server-dlg-title').textContent = '新規サーバー登録';
   }
+  renderSshDetails(id ? serversCache.find((x) => x.id === id) : null);
   dlgServer.showModal();
 }
+
+/* ---- SSH高度な設定 ---- */
+function renderSshDetails(server) {
+  const details = document.getElementById('server-ssh-details');
+  details.hidden = !currentUser || currentUser.role !== 'admin';
+  details.open = false;
+  document.getElementById('ssh-err').hidden = true;
+  document.getElementById('ssh-status').hidden = true;
+
+  const hasServer = !!server;
+  document.getElementById('ssh-save-hint').hidden = hasServer;
+  document.getElementById('ssh-fields-wrap').hidden = !hasServer;
+  if (!hasServer) return;
+
+  const ssh = server.ssh || { configured: false };
+  document.getElementById('ssh-host').value = ssh.host || '';
+  document.getElementById('ssh-port').value = ssh.port || 22;
+  document.getElementById('ssh-username').value = ssh.username || '';
+  document.getElementById('ssh-os-hint').value = ssh.os_hint || 'linux';
+  document.getElementById('ssh-auth-method').value = ssh.auth_method || 'password';
+  document.getElementById('ssh-password').value = '';
+  document.getElementById('ssh-private-key').value = '';
+  document.getElementById('ssh-passphrase').value = '';
+  document.getElementById('ssh-use-sudo').checked = ssh.use_sudo !== false;
+  syncSshAuthFields();
+  document.getElementById('btn-ssh-clear').hidden = !ssh.configured;
+  document.getElementById('btn-ssh-fetch').hidden = !ssh.configured;
+
+  const passwordInput = document.getElementById('ssh-password');
+  const keyInput = document.getElementById('ssh-private-key');
+  passwordInput.placeholder = ssh.configured ? '設定済み（変更する場合のみ入力）' : 'パスワードを入力';
+  keyInput.placeholder = ssh.configured
+    ? '設定済み（変更する場合のみ入力）'
+    : '-----BEGIN OPENSSH PRIVATE KEY-----\n...';
+}
+
+function syncSshAuthFields() {
+  const isKey = document.getElementById('ssh-auth-method').value === 'key';
+  document.getElementById('ssh-password-label').hidden = isKey;
+  document.getElementById('ssh-key-label').hidden = !isKey;
+  document.getElementById('ssh-passphrase-label').hidden = !isKey;
+  document.getElementById('ssh-sudo-field').hidden = document.getElementById('ssh-os-hint').value === 'windows';
+}
+document.getElementById('ssh-auth-method').addEventListener('change', syncSshAuthFields);
+document.getElementById('ssh-os-hint').addEventListener('change', syncSshAuthFields);
+
+document.getElementById('btn-ssh-save').addEventListener('click', async () => {
+  const errEl = document.getElementById('ssh-err');
+  const statusEl = document.getElementById('ssh-status');
+  errEl.hidden = true;
+  statusEl.hidden = true;
+  const id = document.getElementById('server-id').value;
+  if (!id) return;
+
+  const payload = {
+    host: document.getElementById('ssh-host').value.trim(),
+    port: Number(document.getElementById('ssh-port').value) || 22,
+    username: document.getElementById('ssh-username').value.trim(),
+    auth_method: document.getElementById('ssh-auth-method').value,
+    os_hint: document.getElementById('ssh-os-hint').value,
+    use_sudo: document.getElementById('ssh-use-sudo').checked,
+  };
+  const password = document.getElementById('ssh-password').value;
+  const privateKey = document.getElementById('ssh-private-key').value;
+  const passphrase = document.getElementById('ssh-passphrase').value;
+  if (password) payload.password = password;
+  if (privateKey) payload.private_key = privateKey;
+  if (passphrase) payload.passphrase = passphrase;
+
+  try {
+    const updated = await api(`/api/servers/${id}/ssh`, { method: 'PUT', body: JSON.stringify(payload) });
+    const idx = serversCache.findIndex((s) => s.id === Number(id));
+    if (idx !== -1) serversCache[idx] = updated;
+    renderSshDetails(updated);
+    statusEl.textContent = 'SSH設定を保存しました。';
+    statusEl.className = 'ssh-status ok';
+    statusEl.hidden = false;
+    renderServersTable();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+document.getElementById('btn-ssh-clear').addEventListener('click', async () => {
+  const id = document.getElementById('server-id').value;
+  if (!id) return;
+  const ok = await confirmDialog({
+    title: 'SSH設定の削除',
+    message: '保存されているSSH接続情報を削除します。よろしいですか？',
+    okLabel: '削除する',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/servers/${id}/ssh`, { method: 'DELETE' });
+    await loadServers();
+    renderSshDetails(serversCache.find((s) => s.id === Number(id)));
+  } catch (err) {
+    const errEl = document.getElementById('ssh-err');
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+document.getElementById('btn-ssh-fetch').addEventListener('click', async () => {
+  const id = Number(document.getElementById('server-id').value);
+  if (!id) return;
+  const statusEl = document.getElementById('ssh-status');
+  const errEl = document.getElementById('ssh-err');
+  const btn = document.getElementById('btn-ssh-fetch');
+  errEl.hidden = true;
+  statusEl.className = 'ssh-status';
+  statusEl.textContent = '接続して取得しています…（Windowsは特に時間がかかることがあります）';
+  statusEl.hidden = false;
+  btn.disabled = true;
+  try {
+    const res = await api(`/api/servers/${id}/ssh-fetch`, { method: 'POST' });
+    const s = res.summary;
+    statusEl.textContent = `取得しました。一致${s.matched} / 割り当て候補${s.to_assign} / 未登録${s.unregistered} / 取り外し候補${s.to_remove}`;
+    statusEl.className = 'ssh-status ok';
+    await Promise.all([loadSyncReports(), loadDashboard()]);
+  } catch (err) {
+    statusEl.hidden = true;
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 document.getElementById('form-server').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1933,23 +2131,36 @@ async function loadCommandBuilder() {
   const urlInput = document.getElementById('cmd-url');
   if (!urlInput.value) urlInput.value = location.origin;
 
-  // トークンの発行も一覧取得も管理者専用なので、一般ユーザーには選択肢を出さない
+  await reloadTokenOptions();
+  renderCommand();
+}
+
+// トークン一覧を読み直す。発行・失効の直後や、はじめて構成同期タブを開いたときに呼ぶ。
+async function reloadTokenOptions() {
   const tokenSelect = document.getElementById('cmd-token');
   const keepToken = tokenSelect.value;
-  if (currentUser && currentUser.role === 'admin') {
-    let options = '<option value="__new__">＋ 新しいトークンを発行する</option>';
-    try {
-      const tokens = await api('/api/auth/tokens');
-      options += tokens.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
-    } catch { /* 取得できなくても新規発行はできる */ }
-    tokenSelect.innerHTML = options;
-    tokenSelect.disabled = false;
-    if (keepToken) tokenSelect.value = keepToken;
-  } else {
+  const errEl = document.getElementById('cmd-token-err');
+  errEl.hidden = true;
+
+  // トークンの発行も一覧取得も管理者専用なので、一般ユーザーには選択肢を出さない
+  if (!currentUser || currentUser.role !== 'admin') {
     tokenSelect.innerHTML = '<option value="">(管理者に発行してもらってください)</option>';
     tokenSelect.disabled = true;
+    return;
   }
-  renderCommand();
+  tokenSelect.disabled = false;
+  let options = '<option value="__new__">＋ 新しいトークンを発行する</option>';
+  try {
+    const tokens = await api('/api/auth/tokens');
+    options += tokens.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  } catch (err) {
+    errEl.textContent = `トークン一覧を取得できませんでした: ${err.message}`;
+    errEl.hidden = false;
+  }
+  tokenSelect.innerHTML = options;
+  if (keepToken && [...tokenSelect.options].some((o) => o.value === keepToken)) {
+    tokenSelect.value = keepToken;
+  }
 }
 
 function renderCommand() {
@@ -1959,14 +2170,17 @@ function renderCommand() {
   const url = (document.getElementById('cmd-url').value || location.origin).replace(/\/+$/, '');
   const tokenId = document.getElementById('cmd-token').value;
   const token = issuedTokens.get(tokenId) || TOKEN_PLACEHOLDER;
+  const useSudo = document.getElementById('cmd-sudo').checked;
+
+  document.getElementById('cmd-sudo-field').hidden = os === 'windows';
 
   const note = document.getElementById('cmd-token-note');
   if (tokenId === '__new__') {
-    note.textContent = 'この選択のままコピーすると、トークンを新規発行して値を埋め込みます。';
+    note.textContent = 'このプルダウンで選ぶと、その場でトークンを発行して値を埋め込みます。';
   } else if (!tokenId) {
     note.textContent = 'APIトークンの発行は管理者のみ行えます。発行済みの値を管理者から受け取って置き換えてください。';
   } else if (token === TOKEN_PLACEHOLDER) {
-    note.textContent = 'トークンの値は発行時にしか表示されないため、ここでは埋め込めません。控えがなければ新規発行してください。';
+    note.textContent = 'トークンの値は発行時にしか表示されないため、ここでは埋め込めません。控えがなければ新規発行を選んでください。';
   } else {
     note.textContent = '発行したトークンを埋め込んでいます。この画面を離れると再表示できません。';
   }
@@ -1975,13 +2189,53 @@ function renderCommand() {
     ? `curl.exe -O ${SCRIPT_BASE_URL}/hw_to_csv.ps1\n`
       + `powershell -ExecutionPolicy Bypass -File .\\hw_to_csv.ps1 -Push -Url ${url} -Token ${token} -Server ${server}`
     : `curl -O ${SCRIPT_BASE_URL}/hw_to_csv.py\n`
-      + `sudo python3 hw_to_csv.py --push --url ${url} --token ${token} --server ${server}`;
+      + `${useSudo ? 'sudo ' : ''}python3 hw_to_csv.py --push --url ${url} --token ${token} --server ${server}`;
 }
 
-['cmd-os', 'cmd-server', 'cmd-url', 'cmd-token'].forEach((id) => {
+['cmd-os', 'cmd-server', 'cmd-url', 'cmd-sudo'].forEach((id) => {
   document.getElementById(id).addEventListener('input', renderCommand);
   document.getElementById(id).addEventListener('change', renderCommand);
 });
+
+// トークンを選んだ時点で発行する（コピー操作に副作用を持たせない）
+document.getElementById('cmd-token').addEventListener('change', async (e) => {
+  if (e.target.value !== '__new__') {
+    renderCommand();
+    return;
+  }
+  await issueTokenForSync();
+});
+
+async function issueTokenForSync() {
+  const tokenSelect = document.getElementById('cmd-token');
+  const errEl = document.getElementById('cmd-token-err');
+  errEl.hidden = true;
+  const server = document.getElementById('cmd-server').value;
+  const label = (server && server !== '__new_server__') ? server : 'script';
+
+  tokenSelect.disabled = true;
+  renderCommand();
+  try {
+    const res = await api('/api/auth/tokens', {
+      method: 'POST',
+      body: JSON.stringify({ name: `${label} (構成同期)` }),
+    });
+    issuedTokens.set(String(res.id), res.token);
+    const option = document.createElement('option');
+    option.value = String(res.id);
+    option.textContent = res.name;
+    tokenSelect.insertBefore(option, tokenSelect.firstChild.nextSibling);
+    tokenSelect.value = String(res.id);
+    if (currentUser.role === 'admin') await loadTokens();
+  } catch (err) {
+    errEl.textContent = `トークンを発行できませんでした: ${err.message}`;
+    errEl.hidden = false;
+    tokenSelect.value = '__new__';
+  } finally {
+    tokenSelect.disabled = false;
+    renderCommand();
+  }
+}
 
 // 対象サーバーの選択肢からそのままサーバーを登録できるようにする
 let syncServerPrevValue = '';
@@ -2024,37 +2278,9 @@ async function copyText(text) {
 }
 
 document.getElementById('btn-cmd-copy').addEventListener('click', async () => {
-  const errEl = document.getElementById('sync-err');
-  errEl.hidden = true;
-  const tokenSelect = document.getElementById('cmd-token');
-
-  // 「新規発行」が選ばれていれば、コピーの直前にトークンを作って埋め込む
-  if (tokenSelect.value === '__new__') {
-    const server = document.getElementById('cmd-server').value || 'script';
-    try {
-      const res = await api('/api/auth/tokens', {
-        method: 'POST',
-        body: JSON.stringify({ name: `${server} (構成同期)` }),
-      });
-      issuedTokens.set(String(res.id), res.token);
-      // 一覧の再取得を待たずに選択肢を足す（再取得に失敗しても確実に選べるように）
-      const option = document.createElement('option');
-      option.value = String(res.id);
-      option.textContent = res.name;
-      tokenSelect.appendChild(option);
-      tokenSelect.value = String(res.id);
-      renderCommand();
-      await loadTokens();
-    } catch (err) {
-      errEl.textContent = err.message;
-      errEl.hidden = false;
-      return;
-    }
-  }
-
   const btn = document.getElementById('btn-cmd-copy');
   const ok = await copyText(document.getElementById('cmd-text').textContent);
-  btn.textContent = ok ? 'コピーしました' : 'コピーできません';
+  btn.textContent = ok ? 'コピーしました' : 'コピーできません（手動で選択してください）';
   setTimeout(() => { btn.textContent = 'コピー'; }, 2000);
 });
 
