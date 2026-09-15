@@ -13,7 +13,8 @@ function emptyDB() {
     sessions: [],
     api_tokens: [],
     audit_logs: [],
-    seq: { parts: 0, servers: 0, assignments: 0, users: 0, api_tokens: 0, audit_logs: 0 },
+    sync_reports: [],
+    seq: { parts: 0, servers: 0, assignments: 0, users: 0, api_tokens: 0, audit_logs: 0, sync_reports: 0 },
   };
 }
 

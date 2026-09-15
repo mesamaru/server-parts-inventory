@@ -5,17 +5,47 @@ server-parts-inventory の「CSVから一括登録」でそのまま使える
 CSV形式で標準出力に書き出す。
 
 使い方:
+    # CSVとして出力する
     sudo python3 hw_to_csv.py > parts.csv
+
+    # 在庫管理ツールへ構成を送信して差分を作る（自動では反映されない）
+    sudo python3 hw_to_csv.py --push --url http://192.168.1.10:3000 \
+        --token <APIトークン> --server prox04
+
+送信した内容は「構成同期」画面に差分として溜まり、そこで確認して
+反映します（勝手に台帳が書き換わることはありません）。
 
 追加インストール不要（Python3 / dmidecode / lsblk / lspci は
 Proxmox / Debian に標準で入っている）。dmidecode の読み取りに
 root権限が必要なため sudo で実行すること。
 """
+import argparse
 import csv
+import json
 import os
 import re
+import socket
 import subprocess
 import sys
+import urllib.error
+import urllib.request
+
+
+parser = argparse.ArgumentParser(description="搭載パーツを検出してCSV出力、または在庫管理ツールへ送信する")
+parser.add_argument("--push", action="store_true", help="CSVを出さずに在庫管理ツールへ構成を送信する")
+parser.add_argument("--url", help="在庫管理ツールのURL 例: http://192.168.1.10:3000")
+parser.add_argument("--token", help="設定画面で発行したAPIトークン")
+parser.add_argument("--server", help="登録済みのサーバー名（既定: このホストのhostname）")
+args = parser.parse_args()
+if args.push and (not args.url or not args.token):
+    parser.error("--push には --url と --token が必要です")
+
+if os.geteuid() != 0:
+    print(
+        "# 警告: root権限で実行していません。CPU/メモリ等の情報が取得できていない可能性があります。"
+        " sudo を付けて再実行してください。",
+        file=sys.stderr,
+    )
 
 
 def run(cmd):
@@ -122,6 +152,8 @@ def split_storage_maker(model):
     return "", model
 
 
+CSV_COLUMNS = ["category", "name", "maker", "spec", "serial_number", "status", "purchase_date", "notes"]
+
 rows = []
 
 
@@ -129,7 +161,16 @@ def add(category, name, maker, spec, serial, notes=""):
     name = clean(name)
     if not name:
         return
-    rows.append([category, name, clean(maker), clean(spec), clean(serial), "normal", "", notes])
+    rows.append({
+        "category": category,
+        "name": name,
+        "maker": clean(maker),
+        "spec": clean(spec),
+        "serial_number": clean(serial),
+        "status": "normal",
+        "purchase_date": "",
+        "notes": notes,
+    })
 
 
 # ---- CPU ----
@@ -224,25 +265,60 @@ for line in run(["lspci", "-mm"]).splitlines():
         continue
     add(category, device, normalize_maker(vendor), pci_class, "", f"PCI {slot}")
 
-# ---- 出力 ----
-writer = csv.writer(sys.stdout, lineterminator="\n")
-writer.writerow(["category", "name", "maker", "spec", "serial_number", "status", "purchase_date", "notes"])
-writer.writerows(rows)
-
-# ホスト自体の情報は参考としてstderrへ（サーバー登録名の参考用。CSVには含めない）
+# ---- ホスト情報 ----
 sys_info = dmidecode_records("system")
+host_summary = ""
 if sys_info:
     s = sys_info[0]
-    print(
-        f"# ホスト情報: {clean(s.get('Manufacturer'))} {clean(s.get('Product Name'))} "
-        f"(S/N: {clean(s.get('Serial Number')) or '不明'}) / hostname={os.uname().nodename}",
-        file=sys.stderr,
-    )
-print(f"# 検出件数: {len(rows)}件", file=sys.stderr)
+    host_summary = (
+        f"{clean(s.get('Manufacturer'))} {clean(s.get('Product Name'))} "
+        f"(S/N: {clean(s.get('Serial Number')) or '不明'})"
+    ).strip()
 
-if os.geteuid() != 0:
-    print(
-        "# 警告: root権限で実行していません。CPU/メモリ等の情報が取得できていない可能性があります。"
-        " sudo python3 hw_to_csv.py で再実行してください。",
-        file=sys.stderr,
+
+def push_report(base_url, token, server_name):
+    """検出した構成を在庫管理ツールへ送信する。反映はWeb画面で確認してから行う。"""
+    payload = json.dumps({
+        "server_name": server_name,
+        "host_info": host_summary,
+        "parts": rows,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        base_url.rstrip("/") + "/api/sync/report",
+        data=payload,
+        method="POST",
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
     )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode("utf-8", "replace")
+        try:
+            detail = json.loads(detail).get("error", detail)
+        except json.JSONDecodeError:
+            pass
+        print(f"送信に失敗しました (HTTP {err.code}): {detail}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as err:
+        print(f"送信先に接続できませんでした: {err.reason}", file=sys.stderr)
+        sys.exit(1)
+
+
+if args.push:
+    target = args.server or socket.gethostname()
+    result = push_report(args.url, args.token, target)
+    summary = result.get("summary", {})
+    print(f"「{result.get('server')}」に{len(rows)}件の構成を送信しました。")
+    print(
+        f"  一致: {summary.get('matched', 0)}件 / 在庫から割り当て候補: {summary.get('to_assign', 0)}件 / "
+        f"未登録: {summary.get('unregistered', 0)}件 / 取り外し候補: {summary.get('to_remove', 0)}件"
+    )
+    print("  Web画面の「構成同期」タブで内容を確認して反映してください。")
+else:
+    writer = csv.DictWriter(sys.stdout, fieldnames=CSV_COLUMNS, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    if host_summary:
+        print(f"# ホスト情報: {host_summary} / hostname={os.uname().nodename}", file=sys.stderr)
+    print(f"# 検出件数: {len(rows)}件", file=sys.stderr)

@@ -83,6 +83,54 @@ body {
 }
 .settings-section h2 { margin: 0 0 12px; font-size: 15px; }
 .settings-section .sub-head { margin: 16px 0 6px; font-size: 13px; color: var(--text-muted); }
+.settings-section code { background: #f1f2f5; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+.tab-badge {
+  display: inline-block;
+  background: var(--danger);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 6px;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 構成同期の差分表示 */
+.sync-report {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin-bottom: 18px;
+}
+.sync-report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.sync-report-head h3 { margin: 0; font-size: 15px; }
+.sync-group { margin-top: 16px; }
+.sync-group h4 { margin: 0 0 6px; font-size: 13px; }
+.sync-group.remove h4 { color: var(--danger); }
+.sync-group.assign h4 { color: var(--stock-text); }
+.sync-group.register h4 { color: var(--warn-text); }
+.sync-group.matched h4 { color: var(--text-muted); }
+.sync-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.sync-item:last-child { border-bottom: none; }
+.sync-item input { margin-top: 3px; }
+.sync-item .sync-meta { color: var(--text-muted); font-size: 12px; }
+.sync-actions { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; }
 button.link.danger-link { color: var(--danger); }
 .settings-form { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
 .settings-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }

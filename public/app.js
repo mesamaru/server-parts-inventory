@@ -193,13 +193,12 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
-    // 履歴・ゴミ箱は開いたときに最新を取りに行く
-    if (btn.dataset.tab === 'history') {
-      try {
-        await reloadHistoryTab();
-      } catch (err) {
-        alert(err.message);
-      }
+    // 履歴・構成同期は開いたときに最新を取りに行く
+    try {
+      if (btn.dataset.tab === 'history') await reloadHistoryTab();
+      if (btn.dataset.tab === 'sync') await loadSyncReports();
+    } catch (err) {
+      alert(err.message);
     }
   });
 });
@@ -1589,6 +1588,148 @@ document.getElementById('tokens-tbody').addEventListener('click', async (e) => {
   }
 });
 
+/* ================= 構成同期 ================= */
+let syncReports = [];
+
+function partLabel(p) {
+  const bits = [p.spec, p.serial_number && `S/N: ${p.serial_number}`, p.notes].filter(Boolean);
+  return `<strong>${escapeHtml(categoryLabel(p.category))}</strong> ${p.maker ? `<span class="maker-tag">${escapeHtml(p.maker)}</span>` : ''}${escapeHtml(p.name)}`
+    + (bits.length ? `<br /><span class="sync-meta">${escapeHtml(bits.join(' / '))}</span>` : '');
+}
+
+function syncGroupHtml({ cls, title, items, renderItem }) {
+  if (!items.length) return '';
+  return `<div class="sync-group ${cls}">
+    <h4>${title}（${items.length}件）</h4>
+    ${items.map(renderItem).join('')}
+  </div>`;
+}
+
+function renderSyncReports() {
+  const wrap = document.getElementById('sync-reports');
+  document.getElementById('sync-empty').hidden = syncReports.length > 0;
+  const badge = document.getElementById('sync-badge');
+  badge.textContent = syncReports.length;
+  badge.hidden = syncReports.length === 0;
+
+  wrap.innerHTML = syncReports.map((report) => {
+    const d = report.diff;
+    return `<div class="sync-report" data-report="${report.id}">
+      <div class="sync-report-head">
+        <h3>${escapeHtml(report.server_name)}</h3>
+        <span class="sync-meta">${fmtDateTime(report.created_at)} 受信${report.host_info ? ` / ${escapeHtml(report.host_info)}` : ''}</span>
+      </div>
+
+      ${syncGroupHtml({
+        cls: 'remove',
+        title: '実機に見つからない（取り外す）',
+        items: d.to_remove,
+        renderItem: (item) => `<label class="sync-item">
+          <input type="checkbox" data-sync-remove="${item.assignment_id}" checked />
+          <span>${partLabel(item)}</span>
+        </label>`,
+      })}
+
+      ${syncGroupHtml({
+        cls: 'assign',
+        title: '在庫に一致するものがある（割り当てる）',
+        items: d.to_assign,
+        renderItem: (item) => `<label class="sync-item">
+          <input type="checkbox" data-sync-assign="${item.part_id}" checked />
+          <span>${partLabel(item.reported)}<br /><span class="sync-meta">→ 在庫の「${escapeHtml(item.name)}」を割り当て</span></span>
+        </label>`,
+      })}
+
+      ${syncGroupHtml({
+        cls: 'register',
+        title: '未登録（内容を確認して登録）',
+        items: d.unregistered,
+        renderItem: (item, i) => `<label class="sync-item">
+          <input type="checkbox" data-sync-register="${i}" />
+          <span>${partLabel(item.reported)}</span>
+        </label>`,
+      })}
+
+      ${syncGroupHtml({
+        cls: 'matched',
+        title: '台帳と一致（操作不要）',
+        items: d.matched,
+        renderItem: (item) => `<div class="sync-item"><span>${partLabel(item.reported)}</span></div>`,
+      })}
+
+      <div class="sync-actions">
+        <button type="button" class="secondary" data-sync-dismiss="${report.id}">破棄</button>
+        <button type="button" class="primary" data-sync-apply="${report.id}">選択した内容を反映</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadSyncReports() {
+  syncReports = await api('/api/sync/reports');
+  renderSyncReports();
+}
+
+document.getElementById('tab-sync').addEventListener('click', async (e) => {
+  const t = e.target;
+  const errEl = document.getElementById('sync-err');
+
+  if (t.dataset.syncDismiss) {
+    const ok = await confirmDialog({
+      title: '差分の破棄',
+      message: 'この構成レポートを破棄します。台帳は変更されません。よろしいですか？',
+      okLabel: '破棄する',
+    });
+    if (!ok) return;
+    try {
+      await api(`/api/sync/reports/${t.dataset.syncDismiss}`, { method: 'DELETE' });
+      await loadSyncReports();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+    return;
+  }
+
+  if (t.dataset.syncApply) {
+    const id = Number(t.dataset.syncApply);
+    const report = syncReports.find((r) => r.id === id);
+    const card = t.closest('.sync-report');
+    const checked = (selector) => [...card.querySelectorAll(selector)].filter((cb) => cb.checked);
+
+    const remove_assignment_ids = checked('[data-sync-remove]').map((cb) => Number(cb.dataset.syncRemove));
+    const assign_part_ids = checked('[data-sync-assign]').map((cb) => Number(cb.dataset.syncAssign));
+    const register = checked('[data-sync-register]')
+      .map((cb) => report.diff.unregistered[Number(cb.dataset.syncRegister)].reported);
+
+    if (!remove_assignment_ids.length && !assign_part_ids.length && !register.length) {
+      errEl.textContent = '反映する項目が選択されていません';
+      errEl.hidden = false;
+      return;
+    }
+
+    const ok = await confirmDialog({
+      title: '構成の反映',
+      message: `取り外し${remove_assignment_ids.length}件 / 割り当て${assign_part_ids.length}件 / 新規登録${register.length}件を反映します。よろしいですか？`,
+      okLabel: '反映する',
+    });
+    if (!ok) return;
+
+    errEl.hidden = true;
+    try {
+      const res = await api(`/api/sync/reports/${id}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ remove_assignment_ids, assign_part_ids, register }),
+      });
+      if (res.errors.length) alert(`一部反映できませんでした:\n${res.errors.join('\n')}`);
+      await Promise.all([loadSyncReports(), refreshAll()]);
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+  }
+});
+
 /* ================= 履歴・ゴミ箱 ================= */
 
 const ACTION_LABEL = {
@@ -1709,7 +1850,7 @@ document.querySelectorAll('dialog').forEach((dlg) => {
 });
 
 async function refreshAll() {
-  await Promise.all([loadParts(), loadServers(), loadCategories()]);
+  await Promise.all([loadParts(), loadServers(), loadCategories(), loadSyncReports()]);
 }
 
 (async () => {

@@ -39,6 +39,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab="parts">パーツ一覧</button>
       <button class="tab-btn" data-tab="servers">サーバー一覧</button>
+      <button class="tab-btn" data-tab="sync">構成同期<span class="tab-badge" id="sync-badge" hidden></span></button>
       <button class="tab-btn" data-tab="history">履歴・ゴミ箱</button>
       <button class="tab-btn" data-tab="settings">設定</button>
     </nav>
@@ -121,6 +122,20 @@
       </table>
     </div>
     <p id="servers-empty" class="empty-msg" hidden>サーバーが登録されていません。</p>
+  </section>
+
+  <!-- 構成同期 -->
+  <section id="tab-sync" class="tab-panel">
+    <div class="settings-section">
+      <h2>構成同期</h2>
+      <p class="info-line">
+        Proxmoxホストで <code>sudo python3 hw_to_csv.py --push --url &lt;このツールのURL&gt; --token &lt;APIトークン&gt; --server &lt;サーバー名&gt;</code>
+        を実行すると、実機の構成がここに届きます。内容を確認して反映するまで台帳は変更されません。
+      </p>
+      <p class="err-msg" id="sync-err" hidden></p>
+    </div>
+    <div id="sync-reports"></div>
+    <p id="sync-empty" class="empty-msg" hidden>未処理の構成レポートはありません。</p>
   </section>
 
   <!-- 履歴・ゴミ箱 -->
