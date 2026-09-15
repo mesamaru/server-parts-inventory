@@ -216,6 +216,8 @@ async function loadParts() {
   partsCache = await api(`/api/parts?${params.toString()}`);
   const validIds = new Set(partsCache.map((p) => p.id));
   [...selectedPartIds].forEach((id) => { if (!validIds.has(id)) selectedPartIds.delete(id); });
+  // 件数が変わるとページ位置がずれるので先頭に戻す
+  currentPage = 1;
   renderPartsTable();
 }
 
@@ -288,17 +290,104 @@ function escapeHtml(s) {
   }[c]));
 }
 
+/* ---- 並び替え・ページング ---- */
+let sortKey = 'category';
+let sortDir = 'asc';
+let currentPage = 1;
+let pageSize = 50;
+
+const STATUS_ORDER = { normal: 0, broken: 1, retired: 2 };
+
+function sortValue(part, key) {
+  if (key === 'location') return part.current_server_name || '￿在庫';
+  if (key === 'status') return STATUS_ORDER[part.status] ?? 9;
+  if (key === 'created_at') return part.created_at || '';
+  return part[key] || '';
+}
+
+function sortedParts() {
+  const sorted = [...partsCache].sort((a, b) => {
+    const va = sortValue(a, sortKey);
+    const vb = sortValue(b, sortKey);
+    let cmp;
+    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+    else cmp = String(va).localeCompare(String(vb), 'ja');
+    if (cmp === 0) cmp = a.name.localeCompare(b.name, 'ja');
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+  return sorted;
+}
+
+// 現在のページに表示しているパーツ（全選択やページャの基準になる）
+function pageParts() {
+  const sorted = sortedParts();
+  if (!pageSize) return sorted;
+  const start = (currentPage - 1) * pageSize;
+  return sorted.slice(start, start + pageSize);
+}
+
+function renderPager(total, shown) {
+  const pager = document.getElementById('parts-pager');
+  pager.hidden = total === 0;
+  const start = pageSize ? (currentPage - 1) * pageSize + 1 : 1;
+  const end = pageSize ? start + shown - 1 : total;
+  document.getElementById('pager-info').textContent = total ? `${start}〜${end}件 / 全${total}件` : '';
+  const lastPage = pageSize ? Math.max(1, Math.ceil(total / pageSize)) : 1;
+  document.getElementById('pager-prev').disabled = currentPage <= 1;
+  document.getElementById('pager-next').disabled = currentPage >= lastPage;
+}
+
+function renderSortIndicators() {
+  document.querySelectorAll('#tab-parts th.sortable').forEach((th) => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.sort === sortKey) th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+  });
+}
+
+document.querySelectorAll('#tab-parts th.sortable').forEach((th) => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    if (sortKey === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    else { sortKey = key; sortDir = 'asc'; }
+    currentPage = 1;
+    renderPartsTable();
+  });
+});
+
+document.getElementById('pager-prev').addEventListener('click', () => {
+  if (currentPage > 1) { currentPage--; renderPartsTable(); }
+});
+document.getElementById('pager-next').addEventListener('click', () => {
+  currentPage++;
+  renderPartsTable();
+});
+document.getElementById('page-size').addEventListener('change', (e) => {
+  pageSize = Number(e.target.value);
+  currentPage = 1;
+  renderPartsTable();
+});
+
 function renderPartsTable() {
   const tbody = document.getElementById('parts-tbody');
   const empty = document.getElementById('parts-empty');
+  renderSortIndicators();
   if (!partsCache.length) {
     tbody.innerHTML = '';
     empty.hidden = false;
+    renderPager(0, 0);
     updateBulkBar();
     return;
   }
   empty.hidden = true;
-  tbody.innerHTML = partsCache.map((p) => {
+  const rows = pageParts();
+  // 削除などで最終ページが消えた場合は1ページ戻す
+  if (!rows.length && currentPage > 1) {
+    currentPage--;
+    renderPartsTable();
+    return;
+  }
+  renderPager(partsCache.length, rows.length);
+  tbody.innerHTML = rows.map((p) => {
     const location = p.current_server_id
       ? `<button class="server-link" data-open-server="${p.current_server_id}">${escapeHtml(p.current_server_name || '')}</button>`
       : '在庫';
@@ -339,19 +428,19 @@ function updateBulkBar() {
   document.getElementById('parts-bulk-count').textContent = count;
   bar.hidden = count === 0;
 
+  // 全選択チェックは「今表示しているページ」を対象にする
   const selectAll = document.getElementById('parts-select-all');
-  const visibleIds = partsCache.map((p) => p.id);
+  const visibleIds = pageParts().map((p) => p.id);
   const selectedVisible = visibleIds.filter((id) => selectedPartIds.has(id));
   selectAll.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
   selectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
 }
 
 document.getElementById('parts-select-all').addEventListener('change', (e) => {
-  if (e.target.checked) {
-    partsCache.forEach((p) => selectedPartIds.add(p.id));
-  } else {
-    partsCache.forEach((p) => selectedPartIds.delete(p.id));
-  }
+  pageParts().forEach((p) => {
+    if (e.target.checked) selectedPartIds.add(p.id);
+    else selectedPartIds.delete(p.id);
+  });
   syncRowCheckboxes();
   updateBulkBar();
 });
@@ -835,6 +924,42 @@ document.getElementById('form-part').addEventListener('submit', async (e) => {
   }
 });
 
+/* ---- CSVで書き出し ---- */
+const STATUS_TEXT = { normal: '正常', broken: '故障', retired: '廃棄' };
+
+function csvCell(value) {
+  const s = value === undefined || value === null ? '' : String(value);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+document.getElementById('btn-export-csv').addEventListener('click', () => {
+  if (!partsCache.length) {
+    alert('書き出すパーツがありません');
+    return;
+  }
+  const header = ['category', 'name', 'maker', 'spec', 'serial_number', 'status', 'purchase_date', 'notes', 'assigned_server', 'registered_at'];
+  const lines = [header.join(',')];
+  sortedParts().forEach((p) => {
+    lines.push([
+      p.category, p.name, p.maker, p.spec, p.serial_number,
+      STATUS_TEXT[p.status] || p.status,
+      p.purchase_date || '', p.notes,
+      p.current_server_name || '',
+      p.created_at ? p.created_at.slice(0, 10) : '',
+    ].map(csvCell).join(','));
+  });
+  // ExcelがUTF-8と判別できるようBOMを付ける（取り込み側はBOMを無視する）
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `parts_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
 /* ---- CSV一括登録ダイアログ ---- */
 const dlgBulkImport = document.getElementById('dlg-bulk-import');
 const HEADER_ALIASES = {
@@ -875,7 +1000,9 @@ document.getElementById('bulk-file-input').addEventListener('change', (e) => {
   reader.readAsText(file, 'utf-8');
 });
 
-function parseCSV(text) {
+function parseCSV(rawText) {
+  // Excel等が付けるBOMは先頭列名に混ざるので取り除く
+  const text = rawText.charCodeAt(0) === 0xFEFF ? rawText.slice(1) : rawText;
   const rows = [];
   let row = [];
   let field = '';

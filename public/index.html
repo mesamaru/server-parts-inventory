@@ -117,6 +117,7 @@
           </div>
         </div>
       </div>
+      <button id="btn-export-csv" class="secondary">CSVで書き出し</button>
       <button id="btn-bulk-import" class="secondary">CSVから一括登録</button>
       <button id="btn-new-part" class="primary">＋ 新規パーツ登録</button>
     </div>
@@ -133,14 +134,35 @@
         <thead>
           <tr>
             <th><input type="checkbox" id="parts-select-all" /></th>
-            <th>カテゴリ</th><th>名称</th><th>スペック</th><th>シリアル番号</th>
-            <th>ステータス</th><th>状態／割当先</th><th>登録日</th><th>操作</th>
+            <th class="sortable" data-sort="category">カテゴリ</th>
+            <th class="sortable" data-sort="name">名称</th>
+            <th class="sortable" data-sort="spec">スペック</th>
+            <th class="sortable" data-sort="serial_number">シリアル番号</th>
+            <th class="sortable" data-sort="status">ステータス</th>
+            <th class="sortable" data-sort="location">状態／割当先</th>
+            <th class="sortable" data-sort="created_at">登録日</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody id="parts-tbody"></tbody>
       </table>
     </div>
     <p id="parts-empty" class="empty-msg" hidden>パーツが登録されていません。</p>
+    <div class="pager" id="parts-pager" hidden>
+      <span id="pager-info"></span>
+      <div class="pager-controls">
+        <button type="button" class="secondary" id="pager-prev">← 前へ</button>
+        <button type="button" class="secondary" id="pager-next">次へ →</button>
+        <label class="inline-setting">表示件数
+          <select id="page-size">
+            <option value="25">25件</option>
+            <option value="50" selected>50件</option>
+            <option value="100">100件</option>
+            <option value="0">すべて</option>
+          </select>
+        </label>
+      </div>
+    </div>
   </section>
 
   <!-- サーバー一覧 -->
