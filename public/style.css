@@ -146,6 +146,41 @@ body {
 .cat-legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
 .cat-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; }
 
+/* パーツの写真 */
+.photo-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #fafbff;
+}
+.photo-box h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.photo-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.photo-thumb { position: relative; }
+.photo-thumb img {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  display: block;
+}
+.photo-thumb button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  font-size: 13px;
+  line-height: 1;
+}
+.warranty-expired { color: var(--danger); font-weight: 600; }
+.warranty-soon { color: var(--warn-text); font-weight: 600; }
+
 /* 構成同期の差分表示 */
 .sync-report {
   background: var(--surface);

@@ -17,7 +17,8 @@ const app = express();
 // 素の PORT や未設定時の既定値にもフォールバックする。
 const PORT = process.env.SERVER_PORT || process.env.PORT || 3000;
 
-app.use(express.json());
+// 写真はbase64でJSONに載せて送るため既定の100kbでは足りない
+app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/api/auth', authRouter);

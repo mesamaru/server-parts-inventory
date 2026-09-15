@@ -50,10 +50,29 @@ router.get('/', (req, res) => {
     .sort((a, b) => new Date(b.at) - new Date(a.at))
     .slice(0, 10);
 
+  // 保証期限が切れている / 30日以内に切れるパーツ
+  const today = new Date();
+  const soonLimit = new Date(today.getTime() + 30 * 86400000);
+  const warranty = parts
+    .filter((p) => p.warranty_until)
+    .map((p) => ({
+      id: p.id,
+      category: p.category,
+      name: p.name,
+      maker: p.maker || '',
+      warranty_until: p.warranty_until,
+      expired: new Date(p.warranty_until) < today,
+    }))
+    .filter((p) => p.expired || new Date(p.warranty_until) <= soonLimit)
+    .sort((a, b) => new Date(a.warranty_until) - new Date(b.warranty_until));
+
+  summary.warranty_alerts = warranty.length;
+
   res.json({
     summary,
     categories: [...byCategory.values()].sort((a, b) => b.total - a.total || a.category.localeCompare(b.category, 'ja')),
     servers: serverRows,
+    warranty,
     recent,
   });
 });

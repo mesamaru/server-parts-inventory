@@ -1,7 +1,19 @@
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const router = express.Router();
 const { readDB, writeDB, nextId } = require('../db');
 const { logAction, activeParts, findActivePart } = require('../audit');
+
+const UPLOAD_DIR = path.join(__dirname, '..', '..', 'data', 'uploads');
+const PHOTO_TYPES = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 const STATUS_ALIASES = {
   '正常': 'normal', normal: 'normal',
@@ -85,7 +97,7 @@ router.get('/:id', (req, res) => {
 
 router.post('/', (req, res) => {
   const db = readDB();
-  const { category, name, maker, spec, serial_number, status, purchase_date, notes } = req.body || {};
+  const { category, name, maker, spec, serial_number, status, purchase_date, warranty_until, notes } = req.body || {};
   if (!category || !String(category).trim()) return res.status(400).json({ error: 'カテゴリは必須です' });
   if (!name || !String(name).trim()) return res.status(400).json({ error: '名称は必須です' });
   const resolvedStatus = resolveStatus(status);
@@ -100,7 +112,9 @@ router.post('/', (req, res) => {
     serial_number: serial_number ? String(serial_number).trim() : '',
     status: resolvedStatus,
     purchase_date: purchase_date || null,
+    warranty_until: warranty_until || null,
     notes: notes ? String(notes).trim() : '',
+    photos: [],
     created_at: now,
     updated_at: now,
     deleted_at: null,
@@ -141,6 +155,7 @@ router.post('/bulk', (req, res) => {
       serial_number: raw.serial_number ? String(raw.serial_number).trim() : '',
       status: resolvedStatus,
       purchase_date: raw.purchase_date ? String(raw.purchase_date).trim() : null,
+      warranty_until: raw.warranty_until ? String(raw.warranty_until).trim() : null,
       notes: raw.notes ? String(raw.notes).trim() : '',
     };
 
@@ -152,7 +167,7 @@ router.post('/bulk', (req, res) => {
       return;
     }
 
-    toCreate.push({ id: nextId(db, 'parts'), ...values, created_at: now, updated_at: now, deleted_at: null });
+    toCreate.push({ id: nextId(db, 'parts'), ...values, photos: [], created_at: now, updated_at: now, deleted_at: null });
   });
 
   if (toCreate.length || updated.length) {
@@ -234,11 +249,69 @@ router.post('/bulk-delete', (req, res) => {
   res.json({ deleted, errors });
 });
 
+/* ---- 写真（data/uploads に保存し、パーツにファイル名だけ持たせる） ---- */
+
+router.post('/:id/photos', (req, res) => {
+  const db = readDB();
+  const part = findActivePart(db, req.params.id);
+  if (!part) return res.status(404).json({ error: 'パーツが見つかりません' });
+
+  const { content_type, data } = req.body || {};
+  const ext = PHOTO_TYPES[content_type];
+  if (!ext) return res.status(400).json({ error: '画像はJPEG / PNG / WebP / GIF のみ対応しています' });
+  if (!data) return res.status(400).json({ error: '画像データがありません' });
+
+  const buffer = Buffer.from(String(data), 'base64');
+  if (!buffer.length) return res.status(400).json({ error: '画像データを読み取れませんでした' });
+  if (buffer.length > MAX_PHOTO_BYTES) {
+    return res.status(400).json({ error: '画像は5MBまでです' });
+  }
+
+  // ファイル名はサーバー側で作る（クライアントの名前をパスに使わない）
+  const photoId = crypto.randomBytes(12).toString('hex');
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  fs.writeFileSync(path.join(UPLOAD_DIR, photoId + ext), buffer);
+
+  if (!part.photos) part.photos = [];
+  part.photos.push({ id: photoId, ext, content_type, uploaded_at: new Date().toISOString() });
+  part.updated_at = new Date().toISOString();
+  logAction(db, req, { action: 'part.photo_add', target_type: 'part', target_id: part.id, target_name: part.name });
+  writeDB(db);
+  res.status(201).json({ id: photoId });
+});
+
+router.get('/:id/photos/:photoId', (req, res) => {
+  const db = readDB();
+  const part = findActivePart(db, req.params.id);
+  if (!part) return res.status(404).json({ error: 'パーツが見つかりません' });
+  const photo = (part.photos || []).find((p) => p.id === req.params.photoId);
+  if (!photo) return res.status(404).json({ error: '画像が見つかりません' });
+  const file = path.join(UPLOAD_DIR, photo.id + photo.ext);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: '画像ファイルがありません' });
+  res.type(photo.content_type);
+  res.sendFile(file);
+});
+
+router.delete('/:id/photos/:photoId', (req, res) => {
+  const db = readDB();
+  const part = findActivePart(db, req.params.id);
+  if (!part) return res.status(404).json({ error: 'パーツが見つかりません' });
+  const idx = (part.photos || []).findIndex((p) => p.id === req.params.photoId);
+  if (idx === -1) return res.status(404).json({ error: '画像が見つかりません' });
+  const [photo] = part.photos.splice(idx, 1);
+  const file = path.join(UPLOAD_DIR, photo.id + photo.ext);
+  if (fs.existsSync(file)) fs.unlinkSync(file);
+  part.updated_at = new Date().toISOString();
+  logAction(db, req, { action: 'part.photo_delete', target_type: 'part', target_id: part.id, target_name: part.name });
+  writeDB(db);
+  res.status(204).end();
+});
+
 router.put('/:id', (req, res) => {
   const db = readDB();
   const part = findActivePart(db, req.params.id);
   if (!part) return res.status(404).json({ error: 'パーツが見つかりません' });
-  const { category, name, maker, spec, serial_number, status, purchase_date, notes } = req.body || {};
+  const { category, name, maker, spec, serial_number, status, purchase_date, warranty_until, notes } = req.body || {};
   let resolvedStatus;
   if (status !== undefined) {
     resolvedStatus = resolveStatus(status);
@@ -251,6 +324,7 @@ router.put('/:id', (req, res) => {
   if (serial_number !== undefined) part.serial_number = String(serial_number).trim();
   if (resolvedStatus !== undefined) part.status = resolvedStatus;
   if (purchase_date !== undefined) part.purchase_date = purchase_date || null;
+  if (warranty_until !== undefined) part.warranty_until = warranty_until || null;
   if (notes !== undefined) part.notes = String(notes).trim();
   part.updated_at = new Date().toISOString();
   logAction(db, req, { action: 'part.update', target_type: 'part', target_id: part.id, target_name: part.name });

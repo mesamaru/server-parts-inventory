@@ -77,6 +77,16 @@
       </div>
     </div>
 
+    <div class="settings-section" id="dash-warranty-section" hidden>
+      <h2>保証期限の注意</h2>
+      <div class="table-scroll">
+        <table class="data-table small">
+          <thead><tr><th>カテゴリ</th><th>名称</th><th>保証期限</th><th>状態</th></tr></thead>
+          <tbody id="dash-warranty-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="settings-section">
       <h2>最近の変更</h2>
       <div class="table-scroll">
@@ -349,9 +359,19 @@
     <label>購入日
       <input id="part-purchase-date" type="date" />
     </label>
+    <label>保証期限
+      <input id="part-warranty" type="date" />
+    </label>
     <label>備考
       <textarea id="part-notes" rows="2"></textarea>
     </label>
+    <div class="photo-box" id="part-photo-box" hidden>
+      <h4>写真</h4>
+      <div class="photo-list" id="part-photo-list"></div>
+      <input type="file" id="part-photo-input" accept="image/*" />
+      <p class="unit-label">JPEG / PNG / WebP / GIF・5MBまで</p>
+    </div>
+    <p class="info-line" id="part-photo-hint" hidden>写真は保存後に追加できます。</p>
     <p class="err-msg" id="part-err" hidden></p>
     <div class="dlg-actions">
       <button type="button" class="secondary" id="btn-part-cancel">キャンセル</button>

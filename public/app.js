@@ -3,6 +3,7 @@ let partsCache = [];
 let serversCache = [];
 let allCategories = [];
 let selectedPartIds = new Set();
+let lastCheckedPartId = null;
 const filterState = { categories: new Set(), states: new Set(), statuses: new Set() };
 
 /* ---------- アイコン ---------- */
@@ -473,7 +474,23 @@ document.getElementById('parts-tbody').addEventListener('click', async (e) => {
   const t = e.target;
   if (t.dataset.rowCheck) {
     const id = Number(t.dataset.rowCheck);
-    if (t.checked) selectedPartIds.add(id); else selectedPartIds.delete(id);
+    const ids = pageParts().map((p) => p.id);
+    // Shift+クリックで直前に操作した行からの範囲をまとめて切り替える
+    if (e.shiftKey && lastCheckedPartId !== null && ids.includes(lastCheckedPartId)) {
+      const from = ids.indexOf(lastCheckedPartId);
+      const to = ids.indexOf(id);
+      const [start, end] = from < to ? [from, to] : [to, from];
+      for (let i = start; i <= end; i++) {
+        if (t.checked) selectedPartIds.add(ids[i]);
+        else selectedPartIds.delete(ids[i]);
+      }
+      syncRowCheckboxes();
+    } else if (t.checked) {
+      selectedPartIds.add(id);
+    } else {
+      selectedPartIds.delete(id);
+    }
+    lastCheckedPartId = id;
     updateBulkBar();
     return;
   }
@@ -880,7 +897,9 @@ function openPartDialog(id) {
     document.getElementById('part-serial').value = p.serial_number;
     document.getElementById('part-status').value = p.status;
     document.getElementById('part-purchase-date').value = p.purchase_date ? p.purchase_date.slice(0, 10) : '';
+    document.getElementById('part-warranty').value = p.warranty_until ? p.warranty_until.slice(0, 10) : '';
     document.getElementById('part-notes').value = p.notes;
+    renderPartPhotos(p);
     if (p.maker) {
       const known = (CATEGORY_PRESETS[p.category] || {}).makers || [];
       presetMaker = known.includes(p.maker) ? p.maker : 'その他';
@@ -888,10 +907,76 @@ function openPartDialog(id) {
     }
   } else {
     document.getElementById('part-dlg-title').textContent = '新規パーツ登録';
+    // 写真はパーツIDが決まってからでないと添付できない
+    document.getElementById('part-photo-box').hidden = true;
+    document.getElementById('part-photo-hint').hidden = false;
   }
   renderPartPreset();
   dlgPart.showModal();
 }
+
+/* ---- パーツの写真 ---- */
+function renderPartPhotos(part) {
+  document.getElementById('part-photo-hint').hidden = true;
+  const box = document.getElementById('part-photo-box');
+  box.hidden = false;
+  box.dataset.partId = part.id;
+  document.getElementById('part-photo-input').value = '';
+  document.getElementById('part-photo-list').innerHTML = (part.photos || []).map((ph) => `<div class="photo-thumb">
+    <img src="/api/parts/${part.id}/photos/${ph.id}" alt="" />
+    <button type="button" title="削除" aria-label="写真を削除" data-photo-delete="${ph.id}">×</button>
+  </div>`).join('');
+}
+
+async function refreshPartPhotos(partId) {
+  const part = await api(`/api/parts/${partId}`);
+  renderPartPhotos(part);
+}
+
+document.getElementById('part-photo-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const partId = document.getElementById('part-photo-box').dataset.partId;
+  const errEl = document.getElementById('part-err');
+  errEl.hidden = true;
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error('画像を読み込めませんでした'));
+      reader.readAsDataURL(file);
+    });
+    await api(`/api/parts/${partId}/photos`, {
+      method: 'POST',
+      body: JSON.stringify({ content_type: file.type, data: dataUrl.split(',')[1] }),
+    });
+    await refreshPartPhotos(partId);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+document.getElementById('part-photo-list').addEventListener('click', async (e) => {
+  const photoId = e.target.dataset.photoDelete;
+  if (!photoId) return;
+  const partId = document.getElementById('part-photo-box').dataset.partId;
+  const ok = await confirmDialog({
+    title: '写真の削除',
+    message: 'この写真を削除します。よろしいですか？',
+    okLabel: '削除する',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/parts/${partId}/photos/${photoId}`, { method: 'DELETE' });
+    await refreshPartPhotos(partId);
+  } catch (err) {
+    const errEl = document.getElementById('part-err');
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
 
 document.getElementById('form-part').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -907,6 +992,7 @@ document.getElementById('form-part').addEventListener('submit', async (e) => {
     serial_number: document.getElementById('part-serial').value.trim(),
     status: document.getElementById('part-status').value,
     purchase_date: document.getElementById('part-purchase-date').value || null,
+    warranty_until: document.getElementById('part-warranty').value || null,
     notes: document.getElementById('part-notes').value.trim(),
   };
   try {
@@ -937,13 +1023,13 @@ document.getElementById('btn-export-csv').addEventListener('click', () => {
     alert('書き出すパーツがありません');
     return;
   }
-  const header = ['category', 'name', 'maker', 'spec', 'serial_number', 'status', 'purchase_date', 'notes', 'assigned_server', 'registered_at'];
+  const header = ['category', 'name', 'maker', 'spec', 'serial_number', 'status', 'purchase_date', 'warranty_until', 'notes', 'assigned_server', 'registered_at'];
   const lines = [header.join(',')];
   sortedParts().forEach((p) => {
     lines.push([
       p.category, p.name, p.maker, p.spec, p.serial_number,
       STATUS_TEXT[p.status] || p.status,
-      p.purchase_date || '', p.notes,
+      p.purchase_date || '', p.warranty_until || '', p.notes,
       p.current_server_name || '',
       p.created_at ? p.created_at.slice(0, 10) : '',
     ].map(csvCell).join(','));
@@ -970,6 +1056,7 @@ const HEADER_ALIASES = {
   serial_number: ['serial_number', 'serial', 'シリアル番号', 'シリアル'],
   status: ['status', 'ステータス', '状態'],
   purchase_date: ['purchase_date', '購入日'],
+  warranty_until: ['warranty_until', '保証期限'],
   notes: ['notes', '備考', 'メモ'],
 };
 let bulkParsedRows = [];
@@ -1143,6 +1230,7 @@ document.getElementById('btn-bulk-preview').addEventListener('click', async () =
     serial_number: headerMap.serial_number !== undefined ? (cols[headerMap.serial_number] || '').trim() : '',
     status: headerMap.status !== undefined ? (cols[headerMap.status] || '').trim() : '',
     purchase_date: headerMap.purchase_date !== undefined ? (cols[headerMap.purchase_date] || '').trim() : '',
+    warranty_until: headerMap.warranty_until !== undefined ? (cols[headerMap.warranty_until] || '').trim() : '',
     notes: headerMap.notes !== undefined ? (cols[headerMap.notes] || '').trim() : '',
   }));
 
@@ -1731,6 +1819,7 @@ async function loadDashboard() {
     { label: 'サーバー', value: s.servers, cls: '' },
   ];
   if (s.pending_sync) cards.push({ label: '未処理の構成差分', value: s.pending_sync, cls: 'accent-sync' });
+  if (s.warranty_alerts) cards.push({ label: '保証期限の注意', value: s.warranty_alerts, cls: 'accent-sync' });
   if (s.trashed) cards.push({ label: 'ゴミ箱', value: s.trashed, cls: '' });
 
   document.getElementById('stat-grid').innerHTML = cards.map((c) => `<div class="stat-card ${c.cls}">
@@ -1766,6 +1855,15 @@ async function loadDashboard() {
     <td>${escapeHtml(s2.location) || '-'}</td>
     <td>${escapeHtml(s2.status) || '-'}</td>
     <td>${s2.parts}</td>
+  </tr>`).join('');
+
+  const warranty = data.warranty || [];
+  document.getElementById('dash-warranty-section').hidden = warranty.length === 0;
+  document.getElementById('dash-warranty-tbody').innerHTML = warranty.map((w) => `<tr>
+    <td class="cell-category">${escapeHtml(categoryLabel(w.category))}</td>
+    <td>${w.maker ? `<span class="maker-tag">${escapeHtml(w.maker)}</span>` : ''}${escapeHtml(w.name)}</td>
+    <td>${fmtDate(w.warranty_until)}</td>
+    <td class="${w.expired ? 'warranty-expired' : 'warranty-soon'}">${w.expired ? '期限切れ' : 'まもなく期限'}</td>
   </tr>`).join('');
 
   document.getElementById('dash-recent-empty').hidden = data.recent.length > 0;
