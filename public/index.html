@@ -170,17 +170,54 @@
   </form>
 </dialog>
 
+<!-- パーツのサーバー割り当てモーダル（割り当て／移動／取り外しを1つにまとめたもの） -->
+<dialog id="dlg-part-server">
+  <form id="form-part-server" method="dialog">
+    <div class="detail-header">
+      <h2 id="part-server-title">サーバー割り当て</h2>
+      <button type="button" class="dlg-close" id="btn-part-server-close" title="閉じる" aria-label="閉じる">×</button>
+    </div>
+    <p class="info-line" id="part-server-current"></p>
+    <label id="part-server-select-label">
+      <span id="part-server-select-caption">割り当て先サーバー</span>
+      <select id="part-server-select"></select>
+    </label>
+    <label>取付日
+      <input id="part-server-date" type="date" />
+    </label>
+    <label>備考
+      <textarea id="part-server-notes" rows="2"></textarea>
+    </label>
+    <p class="err-msg" id="part-server-err" hidden></p>
+    <div class="dlg-actions">
+      <button type="button" class="danger" id="btn-part-server-unassign" hidden>取り外して在庫に戻す</button>
+      <button type="submit" class="primary" id="btn-part-server-submit">割り当てる</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 確認モーダル -->
+<dialog id="dlg-confirm">
+  <div class="detail-box">
+    <div class="detail-header">
+      <h2 id="confirm-title">確認</h2>
+      <button type="button" class="dlg-close" id="btn-confirm-close" title="閉じる" aria-label="閉じる">×</button>
+    </div>
+    <p class="confirm-message" id="confirm-message"></p>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" id="btn-confirm-cancel">キャンセル</button>
+      <button type="button" class="primary" id="btn-confirm-ok">OK</button>
+    </div>
+  </div>
+</dialog>
+
 <!-- パーツ割り当てモーダル -->
 <dialog id="dlg-assign">
   <form id="form-assign" method="dialog">
     <h2 id="assign-dlg-title">パーツを割り当てる</h2>
-    <input type="hidden" id="assign-part-id" />
     <input type="hidden" id="assign-server-id" />
-    <label id="assign-part-picker-label">パーツ<span class="req">*</span>
+    <label>割り当てるパーツ<span class="req">*</span>
       <select id="assign-part-select"></select>
-    </label>
-    <label id="assign-server-picker-label">割り当て先サーバー<span class="req">*</span>
-      <select id="assign-server-select"></select>
     </label>
     <label>取付日
       <input id="assign-date" type="date" />

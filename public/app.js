@@ -1,7 +1,4 @@
 /* eslint-disable no-alert */
-const STATUS_LABEL = { normal: '正常', broken: '故障', retired: '廃棄' };
-const STATE_LABEL = { in_stock: '在庫', assigned: '使用中' };
-
 let partsCache = [];
 let serversCache = [];
 let allCategories = [];
@@ -13,14 +10,35 @@ const svgIcon = (inner) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 
 const ICON = {
-  assign: svgIcon('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>'),
   unassign: svgIcon('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),
   move: svgIcon('<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>'),
   history: svgIcon('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'),
   edit: svgIcon('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
   trash: svgIcon('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
   view: svgIcon('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'),
+  server: svgIcon('<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>'),
+  check: svgIcon('<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>'),
+  alert: svgIcon('<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'),
+  archive: svgIcon('<polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>'),
+  package: svgIcon('<line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>'),
 };
+
+const STATUS_ICON = {
+  normal: { icon: ICON.check, label: '正常', cls: 'st-normal' },
+  broken: { icon: ICON.alert, label: '故障', cls: 'st-broken' },
+  retired: { icon: ICON.archive, label: '廃棄', cls: 'st-retired' },
+};
+
+const STATE_ICON = {
+  in_stock: { icon: ICON.package, label: '在庫', cls: 'st-stock' },
+  assigned: { icon: ICON.server, label: '使用中', cls: 'st-assigned' },
+};
+
+function statusIcon(map, key) {
+  const entry = map[key];
+  if (!entry) return '-';
+  return `<span class="status-icon ${entry.cls}" role="img" title="${entry.label}" aria-label="${entry.label}">${entry.icon}</span>`;
+}
 
 function iconBtn(icon, label, dataAttr, danger = false) {
   return `<button type="button" class="icon-btn${danger ? ' icon-danger' : ''}" title="${label}" aria-label="${label}" ${dataAttr}>${icon}</button>`;
@@ -160,31 +178,27 @@ function renderPartsTable() {
   }
   empty.hidden = true;
   tbody.innerHTML = partsCache.map((p) => {
-    const stateBadge = p.assignment_state
-      ? `<span class="badge state-${p.assignment_state}">${STATE_LABEL[p.assignment_state]}</span>`
-      : '-';
     const serverCell = p.current_server_id
       ? `<button class="server-link" data-open-server="${p.current_server_id}">${escapeHtml(p.current_server_name || '')}</button>`
       : '-';
+    const isAssigned = !!p.current_assignment_id;
+    const canAssign = p.status === 'normal' && !isAssigned;
     const actions = [];
-    if (p.status === 'normal' && p.assignment_state === 'in_stock') {
-      actions.push(iconBtn(ICON.assign, '割り当てる', `data-assign-part="${p.id}"`));
+    if (isAssigned || canAssign) {
+      const label = isAssigned ? 'サーバー割り当て（移動・取り外し）' : 'サーバーに割り当てる';
+      actions.push(iconBtn(ICON.server, label, `data-part-server="${p.id}"`));
     }
-    if (p.assignment_state === 'assigned') {
-      actions.push(iconBtn(ICON.unassign, '取り外す', `data-remove-assignment="${p.current_assignment_id}"`));
-      actions.push(iconBtn(ICON.move, '別サーバーへ移動', `data-move-assignment="${p.current_assignment_id}" data-move-part="${escapeHtml(p.name)}"`));
-    }
-    actions.push(iconBtn(ICON.history, '履歴', `data-part-history="${p.id}"`));
     actions.push(iconBtn(ICON.edit, '編集', `data-edit-part="${p.id}"`));
+    actions.push(iconBtn(ICON.history, '履歴', `data-part-history="${p.id}"`));
     actions.push(iconBtn(ICON.trash, '削除', `data-delete-part="${p.id}"`, true));
     return `<tr>
       <td data-label=""><input type="checkbox" class="row-check" data-row-check="${p.id}" ${selectedPartIds.has(p.id) ? 'checked' : ''} /></td>
-      <td data-label="カテゴリ">${escapeHtml(p.category)}</td>
+      <td data-label="カテゴリ" class="cell-category">${escapeHtml(p.category)}</td>
       <td data-label="名称">${escapeHtml(p.name)}</td>
       <td data-label="スペック">${escapeHtml(p.spec) || '-'}</td>
       <td data-label="シリアル番号">${escapeHtml(p.serial_number) || '-'}</td>
-      <td data-label="ステータス"><span class="badge status-${p.status}">${STATUS_LABEL[p.status]}</span></td>
-      <td data-label="状態">${stateBadge}</td>
+      <td data-label="ステータス">${statusIcon(STATUS_ICON, p.status)}</td>
+      <td data-label="状態">${statusIcon(STATE_ICON, p.assignment_state)}</td>
       <td data-label="割当先">${serverCell}</td>
       <td data-label="登録日">${fmtDate(p.created_at)}</td>
       <td data-label="操作"><div class="row-actions">${actions.join('')}</div></td>
@@ -244,16 +258,48 @@ document.getElementById('parts-tbody').addEventListener('click', async (e) => {
     return;
   }
   if (t.dataset.openServer) return openServerDetail(Number(t.dataset.openServer));
-  if (t.dataset.assignPart) return openAssignDialog({ partId: Number(t.dataset.assignPart) });
-  if (t.dataset.removeAssignment) return removeAssignment(Number(t.dataset.removeAssignment));
-  if (t.dataset.moveAssignment) return openMoveDialog(Number(t.dataset.moveAssignment), t.dataset.movePart);
+  if (t.dataset.partServer) return openPartServerDialog(Number(t.dataset.partServer));
   if (t.dataset.partHistory) return openPartHistory(Number(t.dataset.partHistory));
   if (t.dataset.editPart) return openPartDialog(Number(t.dataset.editPart));
   if (t.dataset.deletePart) return deletePart(Number(t.dataset.deletePart));
 });
 
+/* ---- 確認ダイアログ ---- */
+const dlgConfirm = document.getElementById('dlg-confirm');
+let confirmResolve = null;
+
+function confirmDialog({ title = '確認', message, okLabel = 'OK', danger = false }) {
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-message').textContent = message;
+  const okBtn = document.getElementById('btn-confirm-ok');
+  okBtn.textContent = okLabel;
+  okBtn.className = danger ? 'danger' : 'primary';
+  dlgConfirm.showModal();
+  return new Promise((resolve) => { confirmResolve = resolve; });
+}
+
+document.getElementById('btn-confirm-ok').addEventListener('click', () => {
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  dlgConfirm.close();
+  if (resolve) resolve(true);
+});
+document.getElementById('btn-confirm-cancel').addEventListener('click', () => dlgConfirm.close());
+document.getElementById('btn-confirm-close').addEventListener('click', () => dlgConfirm.close());
+// ×/Escape/キャンセルで閉じた場合はキャンセル扱いにする
+dlgConfirm.addEventListener('close', () => {
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  if (resolve) resolve(false);
+});
+
 async function removeAssignment(assignmentId) {
-  if (!confirm('このパーツを取り外して在庫に戻しますか？')) return;
+  const ok = await confirmDialog({
+    title: 'パーツの取り外し',
+    message: 'このパーツを取り外して在庫に戻します。よろしいですか？',
+    okLabel: '取り外す',
+  });
+  if (!ok) return;
   try {
     await api(`/api/assignments/${assignmentId}/remove`, { method: 'POST', body: JSON.stringify({}) });
     await refreshAll();
@@ -263,7 +309,14 @@ async function removeAssignment(assignmentId) {
 }
 
 async function deletePart(id) {
-  if (!confirm('このパーツを削除します。よろしいですか？')) return;
+  const part = partsCache.find((p) => p.id === id);
+  const ok = await confirmDialog({
+    title: 'パーツの削除',
+    message: `「${part ? part.name : ''}」を削除します。\nこの操作は取り消せません。よろしいですか？`,
+    okLabel: '削除する',
+    danger: true,
+  });
+  if (!ok) return;
   try {
     await api(`/api/parts/${id}`, { method: 'DELETE' });
     await reloadParts();
@@ -272,12 +325,105 @@ async function deletePart(id) {
   }
 }
 
+/* ---- サーバー割り当てダイアログ（割り当て／移動／取り外し） ---- */
+const dlgPartServer = document.getElementById('dlg-part-server');
+let partServerTarget = null;
+
+async function openPartServerDialog(partId) {
+  const part = partsCache.find((p) => p.id === partId);
+  if (!part) return;
+  partServerTarget = part;
+  const isAssigned = !!part.current_assignment_id;
+
+  document.getElementById('part-server-title').textContent = `サーバー割り当て: ${part.name}`;
+  document.getElementById('part-server-current').textContent = isAssigned
+    ? `現在: ${part.current_server_name} に割り当て中`
+    : '現在: 在庫（どのサーバーにも割り当てられていません）';
+  document.getElementById('part-server-select-caption').textContent = isAssigned ? '移動先サーバー' : '割り当て先サーバー';
+  document.getElementById('part-server-date').value = todayInputValue();
+  document.getElementById('part-server-notes').value = '';
+  document.getElementById('part-server-err').hidden = true;
+  document.getElementById('btn-part-server-unassign').hidden = !isAssigned;
+
+  if (!serversCache.length) await loadServers();
+  const options = serversCache.filter((s) => s.id !== part.current_server_id);
+  const select = document.getElementById('part-server-select');
+  const submitBtn = document.getElementById('btn-part-server-submit');
+  select.innerHTML = options.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+  document.getElementById('part-server-select-label').hidden = !options.length;
+  submitBtn.textContent = isAssigned ? '移動する' : '割り当てる';
+  submitBtn.hidden = !options.length;
+
+  dlgPartServer.showModal();
+}
+
+document.getElementById('btn-part-server-close').addEventListener('click', () => dlgPartServer.close());
+
+document.getElementById('form-part-server').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const part = partServerTarget;
+  if (!part) return;
+  const serverId = Number(document.getElementById('part-server-select').value);
+  const dateVal = document.getElementById('part-server-date').value;
+  const notes = document.getElementById('part-server-notes').value.trim();
+  try {
+    if (part.current_assignment_id) {
+      await api(`/api/assignments/${part.current_assignment_id}/move`, {
+        method: 'POST',
+        body: JSON.stringify({ server_id: serverId, notes }),
+      });
+    } else {
+      await api('/api/assignments', {
+        method: 'POST',
+        body: JSON.stringify({
+          part_id: part.id,
+          server_id: serverId,
+          installed_at: dateVal ? new Date(dateVal).toISOString() : undefined,
+          notes,
+        }),
+      });
+    }
+    dlgPartServer.close();
+    await refreshAll();
+  } catch (err) {
+    const el = document.getElementById('part-server-err');
+    el.textContent = err.message;
+    el.hidden = false;
+  }
+});
+
+document.getElementById('btn-part-server-unassign').addEventListener('click', async () => {
+  const part = partServerTarget;
+  if (!part || !part.current_assignment_id) return;
+  const ok = await confirmDialog({
+    title: 'パーツの取り外し',
+    message: `「${part.name}」を ${part.current_server_name} から取り外して在庫に戻します。よろしいですか？`,
+    okLabel: '取り外す',
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/assignments/${part.current_assignment_id}/remove`, { method: 'POST', body: JSON.stringify({}) });
+    dlgPartServer.close();
+    await refreshAll();
+  } catch (err) {
+    const el = document.getElementById('part-server-err');
+    el.textContent = err.message;
+    el.hidden = false;
+  }
+});
+
 /* ---- 一括操作 ---- */
 
 document.getElementById('btn-bulk-delete-open').addEventListener('click', async () => {
   const ids = [...selectedPartIds];
   if (!ids.length) return;
-  if (!confirm(`${ids.length}件のパーツを削除します。よろしいですか？`)) return;
+  const ok = await confirmDialog({
+    title: 'パーツの一括削除',
+    message: `選択中の${ids.length}件のパーツを削除します。\nこの操作は取り消せません。よろしいですか？`,
+    okLabel: '削除する',
+    danger: true,
+  });
+  if (!ok) return;
   try {
     const res = await api('/api/parts/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
     if (res.errors.length) {
@@ -298,7 +444,12 @@ document.getElementById('btn-bulk-remove-open').addEventListener('click', async 
     alert('選択中に「使用中」のパーツがありません');
     return;
   }
-  if (!confirm(`${targets.length}件のパーツを取り外して在庫に戻しますか？`)) return;
+  const ok = await confirmDialog({
+    title: 'パーツの一括取り外し',
+    message: `${targets.length}件のパーツを取り外して在庫に戻します。よろしいですか？`,
+    okLabel: '取り外す',
+  });
+  if (!ok) return;
   try {
     const res = await api('/api/assignments/bulk-remove', {
       method: 'POST',
@@ -668,7 +819,14 @@ document.getElementById('servers-tbody').addEventListener('click', (e) => {
 });
 
 async function deleteServer(id) {
-  if (!confirm('このサーバーを削除します。よろしいですか？')) return;
+  const server = serversCache.find((s) => s.id === id);
+  const ok = await confirmDialog({
+    title: 'サーバーの削除',
+    message: `「${server ? server.name : ''}」を削除します。\nこの操作は取り消せません。よろしいですか？`,
+    okLabel: '削除する',
+    danger: true,
+  });
+  if (!ok) return;
   try {
     await api(`/api/servers/${id}`, { method: 'DELETE' });
     await loadServers();
@@ -786,61 +944,41 @@ async function refreshServerDetail() {
 }
 
 document.getElementById('btn-server-detail-assign').addEventListener('click', () => {
-  openAssignDialog({ serverId: currentDetailServerId });
+  openAssignDialog(currentDetailServerId);
 });
 
-/* ================= 割り当てダイアログ ================= */
+/* ================= 割り当てダイアログ（サーバー詳細から在庫パーツを選ぶ） ================= */
 const dlgAssign = document.getElementById('dlg-assign');
 document.getElementById('btn-assign-cancel').addEventListener('click', () => dlgAssign.close());
 
-async function openAssignDialog({ partId, serverId }) {
+async function openAssignDialog(serverId) {
   document.getElementById('assign-err').hidden = true;
   document.getElementById('form-assign').reset();
   document.getElementById('assign-date').value = todayInputValue();
+  document.getElementById('assign-server-id').value = serverId;
 
-  const partLabel = document.getElementById('assign-part-picker-label');
-  const serverLabel = document.getElementById('assign-server-picker-label');
+  const server = serversCache.find((s) => s.id === serverId);
+  document.getElementById('assign-dlg-title').textContent = `パーツを割り当てる: ${server ? server.name : ''}`;
+
   const partSelect = document.getElementById('assign-part-select');
-  const serverSelect = document.getElementById('assign-server-select');
-
-  if (partId) {
-    // パーツ行からの起動: パーツ固定、サーバーを選ぶ
-    partLabel.hidden = true;
-    serverLabel.hidden = false;
-    partSelect.innerHTML = `<option value="${partId}"></option>`;
-    document.getElementById('assign-part-id').value = partId;
-    const part = partsCache.find((p) => p.id === partId) || await api(`/api/parts/${partId}`);
-    document.getElementById('assign-dlg-title').textContent = `割り当てる: ${part.name}`;
-    if (!serversCache.length) await loadServers();
-    serverSelect.innerHTML = serversCache.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-  } else if (serverId) {
-    // サーバー詳細からの起動: サーバー固定、在庫パーツを選ぶ
-    partLabel.hidden = false;
-    serverLabel.hidden = true;
-    document.getElementById('assign-server-id').value = serverId;
-    const server = serversCache.find((s) => s.id === serverId);
-    document.getElementById('assign-dlg-title').textContent = `パーツを割り当てる: ${server ? server.name : ''}`;
-    const stockParts = await api('/api/parts?assignment_state=in_stock');
-    if (!stockParts.length) {
-      partSelect.innerHTML = '<option value="">(在庫パーツがありません)</option>';
-    } else {
-      partSelect.innerHTML = stockParts
-        .map((p) => `<option value="${p.id}">${escapeHtml(p.category)} / ${escapeHtml(p.name)}${p.serial_number ? ' (' + escapeHtml(p.serial_number) + ')' : ''}</option>`)
-        .join('');
-    }
+  const stockParts = await api('/api/parts?assignment_state=in_stock&status=normal');
+  if (!stockParts.length) {
+    partSelect.innerHTML = '<option value="">(割り当て可能な在庫パーツがありません)</option>';
+  } else {
+    partSelect.innerHTML = stockParts
+      .map((p) => `<option value="${p.id}">${escapeHtml(p.category)} / ${escapeHtml(p.name)}${p.serial_number ? ' (' + escapeHtml(p.serial_number) + ')' : ''}</option>`)
+      .join('');
   }
   dlgAssign.showModal();
 }
 
 document.getElementById('form-assign').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const fixedPartId = document.getElementById('assign-part-id').value;
-  const fixedServerId = document.getElementById('assign-server-id').value;
-  const part_id = fixedPartId || document.getElementById('assign-part-select').value;
-  const server_id = fixedServerId || document.getElementById('assign-server-select').value;
+  const part_id = document.getElementById('assign-part-select').value;
+  const server_id = document.getElementById('assign-server-id').value;
   if (!part_id || !server_id) {
     const el = document.getElementById('assign-err');
-    el.textContent = 'パーツとサーバーを選択してください';
+    el.textContent = '割り当てるパーツを選択してください';
     el.hidden = false;
     return;
   }

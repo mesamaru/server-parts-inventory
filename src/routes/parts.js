@@ -30,7 +30,9 @@ function decorate(db, part) {
   const server = active ? db.servers.find((s) => s.id === active.server_id) : null;
   return {
     ...part,
-    assignment_state: part.status === 'normal' ? (active ? 'assigned' : 'in_stock') : null,
+    // 「状態」は物理的な所在、「ステータス」は状態(正常/故障/廃棄)で独立。
+    // 故障品でも割り当て中なら取り外せるよう、statusとは切り離して判定する。
+    assignment_state: active ? 'assigned' : 'in_stock',
     current_server_id: active ? active.server_id : null,
     current_server_name: active ? (server ? server.name : active.server_name_snapshot) : null,
     current_assignment_id: active ? active.id : null,

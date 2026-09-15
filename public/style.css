@@ -224,6 +224,18 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .bulk-bar span:first-child { font-weight: 600; color: var(--stock-text); margin-right: 4px; }
 
+.cell-category { white-space: nowrap; }
+
+.status-icon { display: inline-flex; align-items: center; }
+.status-icon svg { width: 18px; height: 18px; }
+.st-normal { color: var(--ok-text); }
+.st-broken { color: var(--danger); }
+.st-retired { color: var(--warn-text); }
+.st-stock { color: var(--stock-text); }
+.st-assigned { color: var(--ok-text); }
+
+.confirm-message { font-size: 14px; line-height: 1.6; margin: 0; white-space: pre-wrap; }
+
 .badge {
   display: inline-block;
   padding: 2px 8px;
