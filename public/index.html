@@ -11,7 +11,7 @@
 <div id="auth-screen" hidden>
   <form class="auth-card" id="form-auth">
     <h1 class="brand">Dmidex</h1>
-    <p class="brand-sub">サーバーパーツ在庫管理</p>
+    <p class="brand-sub">サーバーパーツ在庫管理 <span class="version-tag" id="auth-version"></span></p>
     <p class="info-line" id="auth-lead">ログインしてください。</p>
     <label>ユーザー名
       <input id="auth-username" autocomplete="username" required />
@@ -30,7 +30,7 @@
 <div id="app-shell" hidden>
 <header class="topbar">
   <div class="topbar-row">
-    <h1 class="brand">Dmidex<span class="brand-note">サーバーパーツ在庫管理</span></h1>
+    <h1 class="brand">Dmidex<span class="brand-note">サーバーパーツ在庫管理</span><span class="version-tag" id="app-version"></span></h1>
     <div class="topbar-user">
       <span id="current-user"></span>
       <button type="button" class="secondary" id="btn-logout">ログアウト</button>

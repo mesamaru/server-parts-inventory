@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const pkg = require('./package.json');
 
 const partsRouter = require('./src/routes/parts');
 const serversRouter = require('./src/routes/servers');
@@ -21,6 +22,9 @@ const PORT = process.env.SERVER_PORT || process.env.PORT || 3000;
 app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ログイン前でも表示できるよう認証不要にしておく
+app.get('/api/version', (req, res) => res.json({ name: 'Dmidex', version: pkg.version }));
+
 app.use('/api/auth', authRouter);
 // データを扱うAPIはすべてログイン（またはAPIトークン）必須
 app.use('/api/parts', requireAuth, partsRouter);
@@ -37,5 +41,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Dmidex listening on 0.0.0.0:${PORT}`);
+  console.log(`Dmidex v${pkg.version} listening on 0.0.0.0:${PORT}`);
 });

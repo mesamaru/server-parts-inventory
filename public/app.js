@@ -504,6 +504,24 @@ document.getElementById('parts-tbody').addEventListener('click', async (e) => {
   if (t.dataset.deletePart) return deletePart(Number(t.dataset.deletePart));
 });
 
+/* ---- ダイアログを閉じたときの後始末 ---- */
+// close イベントを発火しない環境があるため、閉じる処理は必ずこの関数を通し、
+// 後始末は明示的に呼ぶ。closeイベントが飛ぶ環境でも二重に走らないよう、
+// 登録する処理は冪等にしておくこと。
+const afterCloseHooks = new Map();
+
+function registerAfterClose(dialog, handler) {
+  afterCloseHooks.set(dialog, handler);
+  dialog.addEventListener('close', handler);
+  dialog.addEventListener('cancel', handler);
+}
+
+function closeDialog(dialog) {
+  dialog.close();
+  const handler = afterCloseHooks.get(dialog);
+  if (handler) handler();
+}
+
 /* ---- 確認ダイアログ ---- */
 const dlgConfirm = document.getElementById('dlg-confirm');
 let confirmResolve = null;
@@ -518,20 +536,21 @@ function confirmDialog({ title = '確認', message, okLabel = 'OK', danger = fal
   return new Promise((resolve) => { confirmResolve = resolve; });
 }
 
+// 未解決なら決着させる。既に解決済みなら何もしない（冪等）
+function settleConfirm(result) {
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  if (resolve) resolve(result);
+}
+
 document.getElementById('btn-confirm-ok').addEventListener('click', () => {
-  const resolve = confirmResolve;
-  confirmResolve = null;
+  settleConfirm(true);
   dlgConfirm.close();
-  if (resolve) resolve(true);
 });
-document.getElementById('btn-confirm-cancel').addEventListener('click', () => dlgConfirm.close());
-document.getElementById('btn-confirm-close').addEventListener('click', () => dlgConfirm.close());
-// ×/Escape/キャンセルで閉じた場合はキャンセル扱いにする
-dlgConfirm.addEventListener('close', () => {
-  const resolve = confirmResolve;
-  confirmResolve = null;
-  if (resolve) resolve(false);
-});
+// ×/Escape/キャンセル/背景クリックはキャンセル扱い
+document.getElementById('btn-confirm-cancel').addEventListener('click', () => closeDialog(dlgConfirm));
+document.getElementById('btn-confirm-close').addEventListener('click', () => closeDialog(dlgConfirm));
+registerAfterClose(dlgConfirm, () => settleConfirm(false));
 
 async function removeAssignment(assignmentId) {
   const ok = await confirmDialog({
@@ -1388,7 +1407,7 @@ async function deleteServer(id) {
 /* ---- サーバー登録/編集ダイアログ ---- */
 const dlgServer = document.getElementById('dlg-server');
 document.getElementById('btn-new-server').addEventListener('click', () => openServerDialog(null));
-document.getElementById('btn-server-cancel').addEventListener('click', () => dlgServer.close());
+document.getElementById('btn-server-cancel').addEventListener('click', () => closeDialog(dlgServer));
 
 function openServerDialog(id) {
   document.getElementById('server-err').hidden = true;
@@ -1417,13 +1436,24 @@ document.getElementById('form-server').addEventListener('submit', async (e) => {
     notes: document.getElementById('server-notes').value.trim(),
   };
   try {
+    let created = null;
     if (id) {
       await api(`/api/servers/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
     } else {
-      await api('/api/servers', { method: 'POST', body: JSON.stringify(payload) });
+      created = await api('/api/servers', { method: 'POST', body: JSON.stringify(payload) });
     }
+    // closeイベントで選択が巻き戻らないよう、閉じる前にフラグを降ろす
+    const fromSyncTab = syncAwaitingNewServer;
+    syncAwaitingNewServer = false;
     dlgServer.close();
     await loadServers();
+    if (fromSyncTab && created) {
+      await loadCommandBuilder();
+      const select = document.getElementById('cmd-server');
+      select.value = created.name;
+      syncServerPrevValue = created.name;
+      renderCommand();
+    }
   } catch (err) {
     const el = document.getElementById('server-err');
     el.textContent = err.message;
@@ -1433,9 +1463,9 @@ document.getElementById('form-server').addEventListener('submit', async (e) => {
 
 /* ---- サーバー詳細（構成）ダイアログ ---- */
 const dlgServerDetail = document.getElementById('dlg-server-detail');
-document.getElementById('btn-server-detail-close').addEventListener('click', () => dlgServerDetail.close());
-dlgServerDetail.addEventListener('close', () => { currentDetailServerId = null; });
+document.getElementById('btn-server-detail-close').addEventListener('click', () => closeDialog(dlgServerDetail));
 let currentDetailServerId = null;
+registerAfterClose(dlgServerDetail, () => { currentDetailServerId = null; });
 
 // 同じカテゴリ・名称・スペックのパーツ（メモリ等）を1行にまとめる
 function groupConfig(config) {
@@ -1896,10 +1926,9 @@ const issuedTokens = new Map();
 async function loadCommandBuilder() {
   const serverSelect = document.getElementById('cmd-server');
   const keepServer = serverSelect.value;
-  serverSelect.innerHTML = serversCache.length
-    ? serversCache.map((s) => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join('')
-    : '<option value="">(サーバー未登録)</option>';
-  if (keepServer) serverSelect.value = keepServer;
+  serverSelect.innerHTML = serversCache.map((s) => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join('')
+    + '<option value="__new_server__">＋ 新しいサーバーを登録する</option>';
+  if (keepServer && keepServer !== '__new_server__') serverSelect.value = keepServer;
 
   const urlInput = document.getElementById('cmd-url');
   if (!urlInput.value) urlInput.value = location.origin;
@@ -1925,7 +1954,8 @@ async function loadCommandBuilder() {
 
 function renderCommand() {
   const os = document.getElementById('cmd-os').value;
-  const server = document.getElementById('cmd-server').value || '<サーバー名>';
+  const serverValue = document.getElementById('cmd-server').value;
+  const server = (!serverValue || serverValue === '__new_server__') ? '<サーバー名>' : serverValue;
   const url = (document.getElementById('cmd-url').value || location.origin).replace(/\/+$/, '');
   const tokenId = document.getElementById('cmd-token').value;
   const token = issuedTokens.get(tokenId) || TOKEN_PLACEHOLDER;
@@ -1951,6 +1981,28 @@ function renderCommand() {
 ['cmd-os', 'cmd-server', 'cmd-url', 'cmd-token'].forEach((id) => {
   document.getElementById(id).addEventListener('input', renderCommand);
   document.getElementById(id).addEventListener('change', renderCommand);
+});
+
+// 対象サーバーの選択肢からそのままサーバーを登録できるようにする
+let syncServerPrevValue = '';
+let syncAwaitingNewServer = false;
+
+document.getElementById('cmd-server').addEventListener('change', (e) => {
+  if (e.target.value !== '__new_server__') {
+    syncServerPrevValue = e.target.value;
+    return;
+  }
+  syncAwaitingNewServer = true;
+  openServerDialog(null);
+});
+
+// 登録せずに閉じた場合は選択を元に戻す
+registerAfterClose(document.getElementById('dlg-server'), () => {
+  if (!syncAwaitingNewServer) return;
+  syncAwaitingNewServer = false;
+  const select = document.getElementById('cmd-server');
+  select.value = syncServerPrevValue || (select.options[0] ? select.options[0].value : '');
+  renderCommand();
 });
 
 async function copyText(text) {
@@ -2260,7 +2312,7 @@ document.getElementById('tab-history').addEventListener('click', async (e) => {
 // dialog要素自身にはpaddingが無く中身は子要素なので、e.targetがdialogなら背景クリック。
 document.querySelectorAll('dialog').forEach((dlg) => {
   dlg.addEventListener('click', (e) => {
-    if (e.target === dlg) dlg.close();
+    if (e.target === dlg) closeDialog(dlg);
   });
 });
 
@@ -2271,6 +2323,13 @@ async function refreshAll() {
 }
 
 (async () => {
+  try {
+    // バージョンはpackage.jsonを唯一の情報源としてサーバーから取得する
+    const { version } = await api('/api/version');
+    document.getElementById('app-version').textContent = `v${version}`;
+    document.getElementById('auth-version').textContent = `v${version}`;
+  } catch { /* 取得できなくても動作には影響しない */ }
+
   try {
     const state = await api('/api/auth/state');
     if (state.user) await showApp(state.user);
