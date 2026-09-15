@@ -20,18 +20,30 @@
   <section id="tab-parts" class="tab-panel active">
     <div class="toolbar">
       <input id="parts-search" type="search" placeholder="検索（名称・スペック・シリアル番号など）" />
-      <select id="parts-filter-category"><option value="">すべてのカテゴリ</option></select>
-      <select id="parts-filter-state">
-        <option value="">すべての状態</option>
-        <option value="in_stock">在庫</option>
-        <option value="assigned">使用中</option>
-      </select>
-      <select id="parts-filter-status">
-        <option value="">すべてのステータス</option>
-        <option value="normal">正常</option>
-        <option value="broken">故障</option>
-        <option value="retired">廃棄</option>
-      </select>
+      <div class="filter-wrap">
+        <button type="button" class="secondary" id="btn-filter">フィルタ<span class="filter-badge" id="filter-badge" hidden></span></button>
+        <div class="filter-panel" id="filter-panel" hidden>
+          <div class="filter-group">
+            <h4>カテゴリ</h4>
+            <div id="filter-category-list"></div>
+          </div>
+          <div class="filter-group">
+            <h4>状態</h4>
+            <label><input type="checkbox" data-filter-group="states" value="in_stock" /> 在庫</label>
+            <label><input type="checkbox" data-filter-group="states" value="assigned" /> 使用中</label>
+          </div>
+          <div class="filter-group">
+            <h4>ステータス</h4>
+            <label><input type="checkbox" data-filter-group="statuses" value="normal" /> 正常</label>
+            <label><input type="checkbox" data-filter-group="statuses" value="broken" /> 故障</label>
+            <label><input type="checkbox" data-filter-group="statuses" value="retired" /> 廃棄</label>
+          </div>
+          <div class="filter-panel-actions">
+            <button type="button" class="link" id="btn-filter-clear">すべて解除</button>
+            <button type="button" class="secondary" id="btn-filter-close">閉じる</button>
+          </div>
+        </div>
+      </div>
       <button id="btn-bulk-import" class="secondary">CSVから一括登録</button>
       <button id="btn-new-part" class="primary">＋ 新規パーツ登録</button>
     </div>
@@ -43,16 +55,18 @@
       <button type="button" class="danger" id="btn-bulk-delete-open">一括削除</button>
       <button type="button" class="link" id="btn-bulk-clear">選択解除</button>
     </div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th><input type="checkbox" id="parts-select-all" /></th>
-          <th>カテゴリ</th><th>名称</th><th>スペック</th><th>シリアル番号</th>
-          <th>ステータス</th><th>状態</th><th>割当先サーバー</th><th>登録日</th><th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="parts-tbody"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="parts-select-all" /></th>
+            <th>カテゴリ</th><th>名称</th><th>スペック</th><th>シリアル番号</th>
+            <th>ステータス</th><th>状態</th><th>割当先サーバー</th><th>登録日</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="parts-tbody"></tbody>
+      </table>
+    </div>
     <p id="parts-empty" class="empty-msg" hidden>パーツが登録されていません。</p>
   </section>
 
@@ -62,12 +76,14 @@
       <input id="servers-search" type="search" placeholder="検索（サーバー名・設置場所）" />
       <button id="btn-new-server" class="primary">＋ 新規サーバー登録</button>
     </div>
-    <table class="data-table">
-      <thead>
-        <tr><th>サーバー名</th><th>設置場所</th><th>ステータス</th><th>搭載パーツ数</th><th>操作</th></tr>
-      </thead>
-      <tbody id="servers-tbody"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr><th>サーバー名</th><th>設置場所</th><th>ステータス</th><th>搭載パーツ数</th><th>操作</th></tr>
+        </thead>
+        <tbody id="servers-tbody"></tbody>
+      </table>
+    </div>
     <p id="servers-empty" class="empty-msg" hidden>サーバーが登録されていません。</p>
   </section>
 </main>
@@ -249,15 +265,15 @@
 <!-- パーツ履歴モーダル -->
 <dialog id="dlg-part-history">
   <div class="history-box">
-    <h2 id="part-history-title">パーツの割り当て履歴</h2>
+    <div class="detail-header">
+      <h2 id="part-history-title">パーツの割り当て履歴</h2>
+      <button type="button" id="btn-part-history-close" class="dlg-close" title="閉じる" aria-label="閉じる">×</button>
+    </div>
     <table class="data-table small">
       <thead><tr><th>サーバー</th><th>取付日</th><th>取外日</th><th>備考</th></tr></thead>
       <tbody id="part-history-tbody"></tbody>
     </table>
     <p id="part-history-empty" class="empty-msg" hidden>履歴がありません。</p>
-    <div class="dlg-actions">
-      <button type="button" class="secondary" id="btn-part-history-close">閉じる</button>
-    </div>
   </div>
 </dialog>
 
@@ -303,7 +319,10 @@
   <div class="detail-box">
     <div class="detail-header">
       <h2 id="server-detail-title">サーバー構成</h2>
-      <button type="button" id="btn-server-detail-assign" class="primary">＋ パーツを割り当てる</button>
+      <div class="detail-header-actions">
+        <button type="button" id="btn-server-detail-assign" class="primary">＋ パーツを割り当てる</button>
+        <button type="button" id="btn-server-detail-close" class="dlg-close" title="閉じる" aria-label="閉じる">×</button>
+      </div>
     </div>
     <p id="server-detail-meta" class="info-line"></p>
 
@@ -320,10 +339,6 @@
       <tbody id="server-detail-history-tbody"></tbody>
     </table>
     <p id="server-detail-history-empty" class="empty-msg" hidden>履歴がありません。</p>
-
-    <div class="dlg-actions">
-      <button type="button" class="secondary" id="btn-server-detail-close">閉じる</button>
-    </div>
   </div>
 </dialog>
 

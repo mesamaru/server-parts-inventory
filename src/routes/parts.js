@@ -19,6 +19,12 @@ function findActiveAssignment(db, partId) {
   return db.assignments.find((a) => a.part_id === partId && a.removed_at === null);
 }
 
+// 同名クエリを複数指定できる（例: ?category=CPU&category=メモリ）
+function queryValues(value) {
+  if (value === undefined || value === null || value === '') return [];
+  return Array.isArray(value) ? value : [value];
+}
+
 function decorate(db, part) {
   const active = findActiveAssignment(db, part.id);
   const server = active ? db.servers.find((s) => s.id === active.server_id) : null;
@@ -35,9 +41,12 @@ router.get('/', (req, res) => {
   const db = readDB();
   let parts = db.parts.map((p) => decorate(db, p));
   const { category, status, assignment_state, q } = req.query;
-  if (category) parts = parts.filter((p) => p.category === category);
-  if (status) parts = parts.filter((p) => p.status === status);
-  if (assignment_state) parts = parts.filter((p) => p.assignment_state === assignment_state);
+  const categories = queryValues(category);
+  const statuses = queryValues(status);
+  const states = queryValues(assignment_state);
+  if (categories.length) parts = parts.filter((p) => categories.includes(p.category));
+  if (statuses.length) parts = parts.filter((p) => statuses.includes(p.status));
+  if (states.length) parts = parts.filter((p) => states.includes(p.assignment_state));
   if (q) {
     const qq = String(q).toLowerCase();
     parts = parts.filter((p) =>
@@ -48,6 +57,13 @@ router.get('/', (req, res) => {
   }
   parts.sort((a, b) => a.category.localeCompare(b.category, 'ja') || a.name.localeCompare(b.name, 'ja'));
   res.json(parts);
+});
+
+// フィルタ用。絞り込み結果ではなく全パーツからカテゴリ一覧を作る
+router.get('/categories', (req, res) => {
+  const db = readDB();
+  const categories = [...new Set(db.parts.map((p) => p.category))].sort((a, b) => a.localeCompare(b, 'ja'));
+  res.json(categories);
 });
 
 router.get('/:id', (req, res) => {

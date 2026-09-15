@@ -4,7 +4,27 @@ const STATE_LABEL = { in_stock: '在庫', assigned: '使用中' };
 
 let partsCache = [];
 let serversCache = [];
+let allCategories = [];
 let selectedPartIds = new Set();
+const filterState = { categories: new Set(), states: new Set(), statuses: new Set() };
+
+/* ---------- アイコン ---------- */
+const svgIcon = (inner) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+
+const ICON = {
+  assign: svgIcon('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>'),
+  unassign: svgIcon('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),
+  move: svgIcon('<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>'),
+  history: svgIcon('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'),
+  edit: svgIcon('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
+  trash: svgIcon('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
+  view: svgIcon('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'),
+};
+
+function iconBtn(icon, label, dataAttr, danger = false) {
+  return `<button type="button" class="icon-btn${danger ? ' icon-danger' : ''}" title="${label}" aria-label="${label}" ${dataAttr}>${icon}</button>`;
+}
 
 /* ---------- api helper ---------- */
 async function api(path, options = {}) {
@@ -50,28 +70,78 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 async function loadParts() {
   const params = new URLSearchParams();
   const q = document.getElementById('parts-search').value.trim();
-  const category = document.getElementById('parts-filter-category').value;
-  const state = document.getElementById('parts-filter-state').value;
-  const status = document.getElementById('parts-filter-status').value;
   if (q) params.set('q', q);
-  if (category) params.set('category', category);
-  if (state) params.set('assignment_state', state);
-  if (status) params.set('status', status);
+  filterState.categories.forEach((c) => params.append('category', c));
+  filterState.states.forEach((s) => params.append('assignment_state', s));
+  filterState.statuses.forEach((s) => params.append('status', s));
   partsCache = await api(`/api/parts?${params.toString()}`);
   const validIds = new Set(partsCache.map((p) => p.id));
   [...selectedPartIds].forEach((id) => { if (!validIds.has(id)) selectedPartIds.delete(id); });
-  renderCategoryFilterOptions();
   renderPartsTable();
 }
 
-function renderCategoryFilterOptions() {
-  const sel = document.getElementById('parts-filter-category');
-  const current = sel.value;
-  const categories = [...new Set(partsCache.map((p) => p.category))].sort((a, b) => a.localeCompare(b, 'ja'));
-  sel.innerHTML = '<option value="">すべてのカテゴリ</option>' +
-    categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  sel.value = current;
+// カテゴリが増減しうる操作のあとに使う（フィルタのカテゴリ一覧も合わせて更新する）
+async function reloadParts() {
+  await Promise.all([loadParts(), loadCategories()]);
 }
+
+/* ---- フィルタ ---- */
+
+async function loadCategories() {
+  allCategories = await api('/api/parts/categories');
+  renderFilterCategories();
+}
+
+function renderFilterCategories() {
+  const wrap = document.getElementById('filter-category-list');
+  if (!allCategories.length) {
+    wrap.innerHTML = '<p class="empty-note">カテゴリがまだありません</p>';
+    return;
+  }
+  wrap.innerHTML = allCategories.map((c) => `<label>
+    <input type="checkbox" data-filter-group="categories" value="${escapeHtml(c)}" ${filterState.categories.has(c) ? 'checked' : ''} />
+    ${escapeHtml(c)}
+  </label>`).join('');
+}
+
+function updateFilterBadge() {
+  const count = filterState.categories.size + filterState.states.size + filterState.statuses.size;
+  const badge = document.getElementById('filter-badge');
+  badge.textContent = count;
+  badge.hidden = count === 0;
+  document.getElementById('btn-filter').classList.toggle('has-filter', count > 0);
+}
+
+const filterPanel = document.getElementById('filter-panel');
+
+document.getElementById('btn-filter').addEventListener('click', (e) => {
+  e.stopPropagation();
+  filterPanel.hidden = !filterPanel.hidden;
+});
+
+document.getElementById('btn-filter-close').addEventListener('click', () => { filterPanel.hidden = true; });
+
+document.addEventListener('click', (e) => {
+  if (!filterPanel.hidden && !e.target.closest('.filter-wrap')) filterPanel.hidden = true;
+});
+
+filterPanel.addEventListener('change', async (e) => {
+  const group = e.target.dataset.filterGroup;
+  if (!group) return;
+  const set = filterState[group];
+  if (e.target.checked) set.add(e.target.value); else set.delete(e.target.value);
+  updateFilterBadge();
+  await loadParts();
+});
+
+document.getElementById('btn-filter-clear').addEventListener('click', async () => {
+  filterState.categories.clear();
+  filterState.states.clear();
+  filterState.statuses.clear();
+  filterPanel.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
+  updateFilterBadge();
+  await loadParts();
+});
 
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
@@ -98,15 +168,15 @@ function renderPartsTable() {
       : '-';
     const actions = [];
     if (p.status === 'normal' && p.assignment_state === 'in_stock') {
-      actions.push(`<button class="link" data-assign-part="${p.id}">割り当てる</button>`);
+      actions.push(iconBtn(ICON.assign, '割り当てる', `data-assign-part="${p.id}"`));
     }
     if (p.assignment_state === 'assigned') {
-      actions.push(`<button class="link" data-remove-assignment="${p.current_assignment_id}">取り外す</button>`);
-      actions.push(`<button class="link" data-move-assignment="${p.current_assignment_id}" data-move-part="${escapeHtml(p.name)}">移動</button>`);
+      actions.push(iconBtn(ICON.unassign, '取り外す', `data-remove-assignment="${p.current_assignment_id}"`));
+      actions.push(iconBtn(ICON.move, '別サーバーへ移動', `data-move-assignment="${p.current_assignment_id}" data-move-part="${escapeHtml(p.name)}"`));
     }
-    actions.push(`<button class="link" data-part-history="${p.id}">履歴</button>`);
-    actions.push(`<button class="link" data-edit-part="${p.id}">編集</button>`);
-    actions.push(`<button class="link" data-delete-part="${p.id}">削除</button>`);
+    actions.push(iconBtn(ICON.history, '履歴', `data-part-history="${p.id}"`));
+    actions.push(iconBtn(ICON.edit, '編集', `data-edit-part="${p.id}"`));
+    actions.push(iconBtn(ICON.trash, '削除', `data-delete-part="${p.id}"`, true));
     return `<tr>
       <td data-label=""><input type="checkbox" class="row-check" data-row-check="${p.id}" ${selectedPartIds.has(p.id) ? 'checked' : ''} /></td>
       <td data-label="カテゴリ">${escapeHtml(p.category)}</td>
@@ -159,9 +229,6 @@ document.getElementById('btn-bulk-clear').addEventListener('click', () => {
 });
 
 document.getElementById('parts-search').addEventListener('input', debounce(loadParts, 250));
-document.getElementById('parts-filter-category').addEventListener('change', loadParts);
-document.getElementById('parts-filter-state').addEventListener('change', loadParts);
-document.getElementById('parts-filter-status').addEventListener('change', loadParts);
 
 function debounce(fn, ms) {
   let t;
@@ -199,7 +266,7 @@ async function deletePart(id) {
   if (!confirm('このパーツを削除します。よろしいですか？')) return;
   try {
     await api(`/api/parts/${id}`, { method: 'DELETE' });
-    await loadParts();
+    await reloadParts();
   } catch (err) {
     alert(err.message);
   }
@@ -218,7 +285,7 @@ document.getElementById('btn-bulk-delete-open').addEventListener('click', async 
         res.errors.map((e) => `#${e.id}: ${e.error}`).join('\n'));
     }
     selectedPartIds.clear();
-    await loadParts();
+    await reloadParts();
   } catch (err) {
     alert(err.message);
   }
@@ -325,7 +392,7 @@ document.getElementById('form-bulk-edit').addEventListener('submit', async (e) =
       alert(`${res.updated.length}件更新しました。\n${res.errors.length}件失敗:\n` +
         res.errors.map((e) => `#${e.id}: ${e.error}`).join('\n'));
     }
-    await loadParts();
+    await reloadParts();
   } catch (err) {
     const el = document.getElementById('bulk-edit-err');
     el.textContent = err.message;
@@ -378,7 +445,7 @@ document.getElementById('form-part').addEventListener('submit', async (e) => {
       await api('/api/parts', { method: 'POST', body: JSON.stringify(payload) });
     }
     dlgPart.close();
-    await loadParts();
+    await reloadParts();
   } catch (err) {
     const el = document.getElementById('part-err');
     el.textContent = err.message;
@@ -528,7 +595,7 @@ document.getElementById('btn-bulk-submit').addEventListener('click', async () =>
     resultEl.textContent = msg;
     resultEl.hidden = false;
     document.getElementById('btn-bulk-submit').disabled = true;
-    await loadParts();
+    await reloadParts();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.hidden = false;
@@ -584,9 +651,9 @@ function renderServersTable() {
     <td data-label="ステータス">${escapeHtml(s.status) || '-'}</td>
     <td data-label="搭載パーツ数">${s.current_parts_count}</td>
     <td data-label="操作"><div class="row-actions">
-      <button class="link" data-open-server="${s.id}">構成を見る</button>
-      <button class="link" data-edit-server="${s.id}">編集</button>
-      <button class="link" data-delete-server="${s.id}">削除</button>
+      ${iconBtn(ICON.view, '構成を見る', `data-open-server="${s.id}"`)}
+      ${iconBtn(ICON.edit, '編集', `data-edit-server="${s.id}"`)}
+      ${iconBtn(ICON.trash, '削除', `data-delete-server="${s.id}"`, true)}
     </div></td>
   </tr>`).join('');
 }
@@ -683,8 +750,8 @@ async function openServerDetail(id) {
       <td>${escapeHtml(c.serial_number) || '-'}</td>
       <td>${fmtDate(c.installed_at)}</td>
       <td><div class="row-actions">
-        <button class="link" data-detail-remove="${c.assignment_id}">取り外す</button>
-        <button class="link" data-detail-move="${c.assignment_id}" data-detail-move-name="${escapeHtml(c.name)}">移動</button>
+        ${iconBtn(ICON.unassign, '取り外す', `data-detail-remove="${c.assignment_id}"`)}
+        ${iconBtn(ICON.move, '別サーバーへ移動', `data-detail-move="${c.assignment_id}" data-detail-move-name="${escapeHtml(c.name)}"`)}
       </div></td>
     </tr>`).join('');
   }
@@ -831,8 +898,17 @@ document.getElementById('form-move').addEventListener('submit', async (e) => {
 });
 
 /* ================= 初期化 ================= */
+
+// 閲覧用ダイアログは背景（グレーアウト部分）のクリックでも閉じられるようにする。
+// dialog要素自身にはpaddingが無く中身は子要素なので、e.targetがdialogなら背景クリック。
+[dlgServerDetail, dlgPartHistory].forEach((dlg) => {
+  dlg.addEventListener('click', (e) => {
+    if (e.target === dlg) dlg.close();
+  });
+});
+
 async function refreshAll() {
-  await Promise.all([loadParts(), loadServers()]);
+  await Promise.all([loadParts(), loadServers(), loadCategories()]);
 }
 
 refreshAll().catch((err) => alert(`データの読み込みに失敗しました: ${err.message}`));
