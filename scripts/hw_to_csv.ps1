@@ -167,6 +167,10 @@ foreach ($board in Get-CimInstance Win32_BaseBoard) {
 $physicalDisks = @()
 try { $physicalDisks = Get-PhysicalDisk -ErrorAction Stop } catch { $physicalDisks = @() }
 foreach ($disk in Get-CimInstance Win32_DiskDrive) {
+    if (-not $disk.Size) {
+        # メディア未挿入のカードリーダー等はSizeがnull/0になるため除外
+        continue
+    }
     $sizeGB = [math]::Round($disk.Size / 1GB, 1)
     # MediaType(HDD/SSD)はGet-PhysicalDiskの方が正確なので、取れる場合はそちらを使う
     $match = $physicalDisks | Where-Object { $_.SerialNumber -and $disk.SerialNumber -and $_.SerialNumber.Trim() -eq $disk.SerialNumber.Trim() } | Select-Object -First 1

@@ -253,6 +253,9 @@ for line in lsblk_out.splitlines():
     fields = dict(re.findall(r'(\w+)="([^"]*)"', line))
     if fields.get("TYPE") != "disk":
         continue
+    if fields.get("SIZE", "0B") in ("0B", "0", ""):
+        # メディア未挿入のカードリーダー等（内蔵SDカードリーダー等）はサイズ0で出てくるため除外
+        continue
     dev = fields.get("NAME", "")
     kind = "HDD" if fields.get("ROTA") == "1" else ("NVMe" if dev.startswith("nvme") else "SSD")
     maker, model = split_storage_maker(fields.get("MODEL"))
